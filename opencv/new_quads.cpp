@@ -5,9 +5,25 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <iostream>
+#include <float.h>
 #include <stdio.h>
 
-               
+/* TODO:
+
+   - blank two border rows/cols in find contours to make sure no outer borders are on edge
+   - WLS to get border lines
+   - intersect lines to get new endpoints
+
+   Possible optimizations:
+
+   1) parallelize ALL OF THE THINGS - contours, quads, etc
+   2) replace neighbor scan in outer border with LUT
+   4) instead of explicitly padding, compute what padded table lookup ought to be
+
+
+ */
+
+
 cv::Scalar random_color() {
   
   cv::RNG& rng = cv::theRNG();
@@ -174,8 +190,6 @@ void test_box() {
     3, 5, 15, 0,
   };
 
-
-
   for (int i=0; img_sizes[i].width; ++i) {
 
     cv::Size isz(img_sizes[i]);
@@ -293,7 +307,115 @@ float furthest_along(const zarray_t* points,
 
 }
 
+void fit_quad(const zarray_t* points,
+              const float ctr[2],
+              struct quad* q,
+              int idx[4],
+              float*l, float* w) {
 
+  float* p0 = q->p[0];
+  float* p1 = q->p[1];
+  float* p2 = q->p[2];
+  float* p3 = q->p[3];
+
+
+  furthest_point(points, ctr, p0, idx+0);
+  float l2 = furthest_point(points, p0, p2, idx+2);
+  
+  *l = sqrt(l2);
+
+  float v[2] = { p0[1] - p2[1], 
+                 p2[0] - p0[0] };
+
+  v[0] /= *l;
+  v[1] /= *l;
+
+  float v1 = furthest_along(points, v, p1, idx+1);
+
+  v[0] = -v[0];
+  v[1] = -v[1];
+
+  float v3 = -furthest_along(points, v, p3, idx+3);
+
+  *w = fabs(v1-v3);
+
+}
+
+void get_quad_sides(const struct quad* q,
+                    float sides[4][2],
+                    float* lmin,
+                    float* lmax) {
+
+  *lmin = FLT_MAX;
+  *lmax = 0;
+
+  for (int i=0; i<4; ++i) {
+    int j = (i+1)&3;
+    sides[i][0] = q->p[j][0] - q->p[i][0];
+    sides[i][1] = q->p[j][1] - q->p[i][1];
+    float l = sqrt(sides[i][0]*sides[i][0] + sides[i][1]*sides[i][1]);
+    *lmin = *lmin < l ? *lmin : l;
+    *lmax = *lmax > l ? *lmax : l;
+  }
+
+  
+}
+
+float segment_dist2(const float a[2],
+                    const float ba[2],
+                    const float c[2]) {
+
+  const float ca[2] = { c[0]-a[0], c[1]-a[1] };
+
+  float ca_ba = ca[0]*ba[0] + ca[1]*ba[1];
+  float ba_ba = ba[0]*ba[0] + ba[1]*ba[1];
+
+  float u = ca_ba / ba_ba;
+  u = u < 0.0 ? 0.0 : u > 1.0 ? 1.0 : u;
+
+  float ux = a[0] + u*ba[0] - c[0];
+  float uy = a[1] + u*ba[1] - c[1];
+
+  /*
+  printf("distance from point (%f, %f) to segment (%f, %f)-(%f, %f) is %f\n",
+         p[0], p[1], p0[0], p0[1], p0[0]+dl[0], p0[1]+dl[1],
+         sqrt(ux*ux + uy*uy));
+  */
+
+  return ux*ux + uy*uy;
+
+}
+                    
+
+float get_max_quad_dist(const zarray_t* points,
+                        const float sides[4][2],
+                        const struct quad* q) {
+
+  float d2max = 0.0;
+
+  // get max over all points
+  for (int i=0; i<zarray_size(points); ++i) {
+
+    const contour_point_t* cp;
+    zarray_get_volatile(points, i, &cp);
+    
+    const float p[2] = { cp->x, cp->y };
+
+    float d2min = FLT_MAX;
+
+    // get min over all sides
+    for (int j=0; j<4; ++j) {
+      float d2 = segment_dist2(q->p[j], sides[j], p);
+      if (d2 < d2min) { d2min = d2; }
+    }
+
+    if (d2min > d2max) { d2max = d2min; }
+    
+  }
+
+  return sqrt(d2max);
+  
+}
 
 // for easy2.png, orig apriltags identifies corners at (basically):
 // 
@@ -323,52 +445,52 @@ zarray_t* extract_rough_quads(const zarray_t* contours) {
 
       float ctr[2];
       float area = contour_area_centroid(ci->points, ctr);
+      area = fabs(area);
 
-      if (fabs(area) >= 64) {
+      // area check
+      if (area < 64) { continue; }
 
-        struct quad q;
+      struct quad q;
+      int idx[4];
+      float l, w;
+      
+      fit_quad(ci->points, ctr, &q, idx, &l, &w);
+      
+      // diagonal aspect ratio check
+      if (w < 0.3*l) { continue; }
 
-        float* p0 = q.p[0];
-        float* p1 = q.p[1];
-        float* p2 = q.p[2];
-        float* p3 = q.p[3];
+      float sides[4][2];
+      float lmin, lmax;
 
-        int idx[4];
+      get_quad_sides(&q, sides, &lmin, &lmax);
 
-        furthest_point(ci->points, ctr, p0, idx+0);
-        float l2 = furthest_point(ci->points, p0, p2, idx+2);
-        float l = sqrt(l2);
+      // side aspect ratio check
+      if (lmin < 0.3*lmax) { continue; }
 
-        float v[2] = { p2[1] - p0[1], 
-                       p0[0] - p2[0] };
+      // max dist from quad check
+      float dmax = get_max_quad_dist(ci->points, sides, &q);
+      if (dmax > 0.03*l+2) { continue; }
+      
+      int n = zarray_size(ci->points);
 
-        v[0] /= l;
-        v[1] /= l;
-
-        float v1 = furthest_along(ci->points, v, p1, idx+1);
-
-        v[0] = -v[0];
-        v[1] = -v[1];
-
-        float v3 = -furthest_along(ci->points, v, p3, idx+3);
-
-        float w = fabs(v1-v3);
-        float a = w/l;
-
-        // check aspect ratio
-        if (a > 0.4) {
-          // TODO: check "quad defect" (convex defect)?
-          // TODO: reject triangles (make sure 4 points unique!)
-          zarray_add(quads, &q);
-
-          //int n = zarray_size(ci->points);
-          //zarray_t* outer = contour_outer_boundary(ci, -1, -1);
-          //zarray_destroy(outer);
-
-        }
-
+      /*
+      printf("got contour with n=%d with area=%f, diameter=%f, and dmax=%f\n", n, area, l, dmax);
+      for (int i=0; i<4; ++i) {
+        int j = (i+1)%4;
+        printf("  contour[%d] = (%f, %f) with diff=%d\n",
+               idx[i], q.p[i][0], q.p[i][1], (idx[j]-idx[i]+n)%n);
       }
+      printf("\n");
+      */
 
+      zarray_t* outer = contour_outer_boundary(ci, -1, -1);
+      zarray_destroy(outer);
+      
+
+      // TODO: check "quad defect" (convex defect)?
+      // TODO: reject triangles (make sure 4 points unique!)
+      zarray_add(quads, &q);
+      
       
     }
 
@@ -489,7 +611,7 @@ int main(int argc, char *argv[]) {
 
     //////////////////////////////////////////////////////////////////////
 
-    box_threshold(t8, t8, 255, 1, 15, 10);
+    box_threshold(t8, t8, 255, 1, 15, 5);
     timeprofile_stamp(tp, "threshold");
 
     //////////////////////////////////////////////////////////////////////
