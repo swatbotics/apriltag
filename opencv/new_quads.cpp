@@ -486,9 +486,6 @@ zarray_t* extract_rough_quads(const zarray_t* contours) {
       zarray_t* outer = contour_outer_boundary(ci, -1, -1);
       zarray_destroy(outer);
       
-
-      // TODO: check "quad defect" (convex defect)?
-      // TODO: reject triangles (make sure 4 points unique!)
       zarray_add(quads, &q);
       
       
