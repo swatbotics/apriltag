@@ -753,7 +753,7 @@ int fit_quad(apriltag_detector_t *td, image_u8_t *im, zarray_t *cluster, struct 
     // matter much at all, but we want them [-1, 1]. (XXX with
     // fixed-point, should range be bigger?)
     double cx = (xmin + xmax) * 0.5 + 0.05118;
-    double cy = (ymin + ymax) * 0.5 + -0.028581;
+    double cy = (ymin + ymax) * 0.5 + -0.028581; // NOTE: I don't understand the intention here -MZ
 
     for (int pidx = 0; pidx < zarray_size(cluster); pidx++) {
         struct pt *p;

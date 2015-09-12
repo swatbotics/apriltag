@@ -40,7 +40,7 @@ either expressed or implied, of the FreeBSD Project.
 
 // least common multiple of 64 (sandy bridge cache line) and 64 (stride
 // needed for 16byte-wide RGBA processing)
-#define DEFAULT_ALIGNMENT 64
+#define DEFAULT_ALIGNMENT 64 // NOTE: I believe stride is in # of uint32_t's not number of bytes, so this is actually 64*4 = 256 byte stride. Desired?
 
 image_u32_t *image_u32_create(int width, int height)
 {

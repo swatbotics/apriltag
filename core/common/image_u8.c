@@ -40,7 +40,7 @@ either expressed or implied, of the FreeBSD Project.
 
 // least common multiple of 64 (sandy bridge cache line) and 24 (stride
 // needed for RGB in 8-wide vector processing)
-#define DEFAULT_ALIGNMENT 96
+#define DEFAULT_ALIGNMENT 96 // NOTE: 96 is not LCM of 64 and 24. That would be 192
 
 static inline double sq(double v)
 {
@@ -277,8 +277,12 @@ static void convolve(const uint8_t *x, uint8_t *y, int sz, const uint8_t *k, int
         y[ksz/2 + i] = acc >> 8;
     }
 
-    for (int i = sz - ksz + ksz/2; i < sz; i++)
-        y[i] = x[i];
+    // fixed a bug where we could start reading/writing before line -MZ
+    int istart = sz - ksz + ksz/2;
+    if (istart < 0) { istart = 0; }
+
+    for (int i = istart; i < sz; i++)
+      y[i] = x[i]; // this was invalid when i = sz - ksz + ksz/2 for small sz
 }
 
 void image_u8_gaussian_blur(image_u8_t *im, double sigma, int ksz)
