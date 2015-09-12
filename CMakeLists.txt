@@ -13,7 +13,7 @@ set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR})
 set(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/lib)
 
 add_subdirectory(core)
-include_directories(core core/common)
+include_directories(core core/common core/contrib)
 
 include(FindPkgConfig)
 pkg_search_module(OPENCV opencv>=2.3 opencv-2.3.1 opencv-3.0.0)

@@ -1,0 +1,905 @@
+#include "contour.h"
+#include <stdio.h>
+
+
+//#define DO_DEBUG
+
+/*
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+*/
+
+#include <assert.h>
+
+typedef int16_t ccount_t;
+
+enum {
+  CCOUNT_MAX = INT16_MAX
+};
+
+
+typedef struct cimage {
+  
+  const int width, height;
+  const int stride;
+
+  ccount_t* const buf;
+
+} cimage_t;
+
+cimage_t* cimage_create(int width, int height) {
+  
+  const int alignment = 64 / sizeof(ccount_t);
+
+  int stride = width;
+
+  if (stride % alignment) {
+    stride += alignment - (stride%alignment);
+  }
+
+  ccount_t* buf = (ccount_t*)malloc(height*stride*sizeof(ccount_t));
+  
+  assert(buf);
+  if (!buf) {
+    fprintf(stderr, "out of memory!");
+    return NULL;
+  }
+
+  cimage_t tmp = { width, height, stride, buf };
+
+  cimage_t* rval = (cimage_t*)malloc(sizeof(cimage_t));
+
+  assert(rval);
+  if (!rval) {
+    fprintf(stderr, "out of memory!");
+    return NULL;
+  }
+
+  memcpy(rval, &tmp, sizeof(cimage_t));
+  
+  return rval;
+  
+}
+
+void cimage_destroy(cimage_t* im) {
+
+  if (!im) {
+    return;
+  }
+
+  free(im->buf);
+  free(im);
+  
+}
+
+enum {
+  NUM_NEIGHBORS = 8,
+  NEIGHBOR_MASK = 0x7,
+};
+
+typedef struct conn_info {
+
+  int lookup[3][3];
+  int offs[8];
+  int di[8];
+  int dj[8];
+
+} conn_info_t;
+
+static const conn_info_t the_cinfo = {
+  {
+    {  3,  2,  1 },
+    {  4, -1,  0 },
+    {  5,  6,  7 }
+  },
+  {  0,  0,  0,  0,  0,  0,  0,  0 },
+  {  0, -1, -1, -1,  0,  1,  1,  1 },
+  {  1,  1,  0, -1, -1, -1,  0,  1 },
+};
+
+
+
+static inline int conn_lookup(const conn_info_t* c,
+                              int isrc, int jsrc,
+                              int idst, int jdst) {
+
+  int di = idst-isrc;
+  int dj = jdst-jsrc;
+
+  assert(di >= -1 && di <= 1 && dj >= -1 && dj <= 1);
+
+  int idx = c->lookup[di+1][dj+1];
+
+  assert(idx >= 0 && idx < NUM_NEIGHBORS);
+  assert(c->di[idx] == di && c->dj[idx] == dj);
+
+  return idx;
+
+}
+
+static inline int conn_scan_cw(const conn_info_t* c,
+                               const cimage_t* im,
+                               uint32_t i,  uint32_t j,
+                               uint32_t i2, uint32_t j2,
+                               uint32_t* i1, uint32_t* j1) {
+  
+  int n = conn_lookup(c, i, j, i2, j2);
+
+  assert(n >= 0 && n < NUM_NEIGHBORS);
+  assert(i < im->height && j < im->width);
+
+  int offs = i*im->stride + j;
+
+  for (int k=0; k<NUM_NEIGHBORS; ++k) {
+    
+    ccount_t v = im->buf[offs + c->offs[n]];
+
+    if (v) {
+      *i1 = i + c->di[n];
+      *j1 = j + c->dj[n];
+      return 1;
+    }
+    
+    n = (n + NEIGHBOR_MASK) & NEIGHBOR_MASK;
+    
+  }
+
+  return 0;
+
+
+}
+
+static inline int conn_scan_ccw(const conn_info_t* c,
+                                const cimage_t* im,
+                                uint32_t i3, uint32_t j3,
+                                uint32_t i2, uint32_t j2,
+                                uint32_t* i4, uint32_t* j4,
+                                int* right_is_zero) {
+  
+  assert(right_is_zero);
+  *right_is_zero = 0;
+
+  int n = conn_lookup(c, i3, j3, i2, j2);
+
+  n = (n+1) & NEIGHBOR_MASK;
+
+  assert(n >= 0 && n < NUM_NEIGHBORS);
+  assert(i3 < im->height && j3 < im->width);
+
+  int offs = i3*im->stride + j3;
+
+  for (int k=0; k<NUM_NEIGHBORS; ++k) {
+    
+    ccount_t v = im->buf[offs + c->offs[n]];
+
+    if (v) {
+      *i4 = i3 + c->di[n];
+      *j4 = j3 + c->dj[n];
+      return 1;
+    } else if (n == 0) {
+      *right_is_zero = 1;
+    }
+    
+    n = (n + 1) & NEIGHBOR_MASK;
+    
+  }
+
+  return 0;
+
+}
+
+static const int debug_print_grid = 1;
+
+static void debug_print_hline(FILE* fp, int w) {
+  fprintf(fp, debug_print_grid ? "+" : " ");
+  for (int x=0; x<w; ++x) {
+    fprintf(fp, debug_print_grid ? "---+" : "    ");
+  }
+  fprintf(fp, "\n");
+}
+
+void debug_print_image(FILE* fp, const cimage_t* im) {
+
+  debug_print_hline(fp, im->width);
+  
+  const char* rowptr = (const char*)im->buf;
+
+  for (int y=0; y<im->height; ++y) {
+
+    fprintf(fp, debug_print_grid ? "|" : " ");
+
+    for (int x=0; x<im->width; ++x) {
+
+      int n = rowptr[x];
+      char a = n < 0 ? '-' : ' ';
+      char b = n ? abs(n) > 15 ? '?' : "0123456789ABCDEF"[abs(n)] : ' ';
+      char c = debug_print_grid ? '|' : ' ';
+
+      fprintf(fp, "%c%c %c", a, b, c);
+
+    }
+
+    fprintf(fp, "\n");
+
+    debug_print_hline(fp, im->width);
+
+    rowptr += im->stride;
+
+  }
+
+}
+
+zarray_t* contour_detect(const image_u8_t* im8) {
+  
+
+  cimage_t* im = cimage_create(im8->width, im8->height);
+
+  const uint8_t* src = im8->buf+im8->stride;
+  ccount_t* dst = im->buf+im->stride;
+
+  memset(im->buf, 0, sizeof(ccount_t)*im->width);
+  memset(im->buf + (im->height-1)*im->stride, 0, sizeof(ccount_t)*im->width);
+
+  for (uint32_t y=1; y<im->height-1; ++y) {
+    for (uint32_t x=1; x<im->width-1; ++x) {
+      dst[x] = src[x] ? 1 : 0;
+    }
+    dst[0] = dst[im->width-1] = 0;
+    src += im8->stride;
+    dst += im->stride;
+  }
+
+  conn_info_t c = the_cinfo;
+  
+  for (int n=0; n<NUM_NEIGHBORS; ++n) {
+    c.offs[n] = c.di[n]*im->stride + c.dj[n];
+  }
+
+#ifdef DO_DEBUG
+  printf("at start of find_contours:\n");
+  debug_print_image(stdout, im);
+#endif
+
+  zarray_t* contours = zarray_create(sizeof(contour_info_t));
+
+  int nbd = 1;
+  
+  ccount_t* f_i = im->buf;
+
+  // for each row
+  for (uint32_t i=0; i<im->height; ++i, f_i += im->stride) {
+
+    // reset LNBD at start of row
+    int lnbd = 1;
+
+#ifdef DO_DEBUG
+    printf("resetting lnbd=%d at start of row\n", lnbd);
+#endif
+
+    // for each column
+    for (uint32_t j=0; j<im->width; ++j) {
+
+      // flag for border
+      int is_border = 0;
+      int is_outer = 0;
+
+      // current border row/col
+      uint32_t i2=i, j2;
+
+      if (f_i[j] == 1 && f_i[j-1] == 0) {
+
+        // 1a) if cur is 1, prev is 0 (outer border)
+        j2 = j-1;
+        is_border = 1;
+        is_outer = 1;
+
+      } else if (f_i[j] >= 1 && f_i[j+1] == 0) {
+
+        // 1b) else if cur is >= 1, next is 0 (hole border)
+        j2 = j+1;
+        if (f_i[j] > 1) {
+          lnbd = f_i[j];
+#ifdef DO_DEBUG
+          printf("reset lnbd=%d upon start of hb\n", lnbd);
+#endif
+        }
+        is_border = 1;
+
+      } 
+
+      if (is_border) {
+
+        if (nbd == CCOUNT_MAX) {
+          fprintf(stderr, "warning: too many borders in contour_detect (max of %d!)\n", CCOUNT_MAX);
+          contour_destroy(contours);
+          cimage_destroy(im);
+          return NULL;
+        }
+        
+        ++nbd;
+
+#ifdef DO_DEBUG
+
+        printf("starting border following for border %d of type %s at %d, %d\n",
+               nbd, f_i[j] ? "ob" : "hb", i, j);
+
+        debug_print_image(stdout, im);
+
+#endif
+
+        contour_info_t cur_info;
+        memset(&cur_info, 0, sizeof(cur_info));
+
+        cur_info.is_outer = is_outer;
+
+        // default parent is -1, which is frame (not added)
+        cur_info.parent = -1;
+
+        cur_info.points = zarray_create(sizeof(contour_point_t));
+
+        // Implement table 1 from paper
+        if (lnbd >= 2) {
+
+          int lnbd_idx = lnbd-2;
+          
+          const contour_info_t* lnbd_info = NULL;
+
+          assert(lnbd_idx >= 0);
+          assert(lnbd_idx < zarray_size(contours));
+          zarray_get_volatile(contours, lnbd_idx, &lnbd_info);
+
+          // if both outer or both hole, take parent from lnbd
+          if (cur_info.is_outer == lnbd_info->is_outer) {
+            cur_info.parent = lnbd_info->parent;
+          } else { // otherwise, parent IS lnbd
+            cur_info.parent = lnbd_idx;
+          }
+
+        }
+
+        //////////////////////////////////////////////////
+        // Step 3
+
+        //////////////////////////////////////////////////
+        // 3.1)
+
+#ifdef DO_DEBUG
+        printf("at i=%d, j=%d, i2=%d, j2=%d\n", i, j, i2, j2);
+#endif
+        uint32_t i1, j1;
+        int found_nonzero = conn_scan_cw(&c, im, i, j, i2, j2, &i1, &j1);
+
+        if (!found_nonzero) {
+
+          // end of 3.1
+          f_i[j] = -nbd;
+          
+          contour_point_t point = { j, i };
+          zarray_add(cur_info.points, &point);
+
+        } else { 
+
+#ifdef DO_DEBUG
+          printf("found next clockwise nonzero neighbor at i1=%d, j1=%d\n", 
+                 i1, j1);
+#endif
+
+          //////////////////////////////////////////////////
+          // 3.2)
+          i2 = i1; j2 = j1;
+
+          uint32_t i3 = i;
+          uint32_t j3 = j;
+
+#ifdef DO_DEBUG
+          printf("now i2=%d, j2=%d, i3=%d, j3=%d\n", i2, j2, i3, j3);
+#endif
+
+          // at start, i3=i, j3=j
+
+          while (1) {
+
+            contour_point_t point = { j3, i3 };
+
+            zarray_add(cur_info.points, &point);
+
+            //////////////////////////////////////////////////
+            // 3.3)
+
+            int right_is_zero = 0;
+            uint32_t i4, j4;
+
+            found_nonzero = conn_scan_ccw(&c, im, i3, j3, i2, j2, &i4, &j4, 
+                                          &right_is_zero);
+
+            assert(found_nonzero);
+
+#ifdef DO_DEBUG
+            printf("at current pixel i3=%d, j3=%d, next non-zero CCW is i4=%d, j4=%d\n", i3, j3, i4, j4);
+#endif
+
+            int offs = i3*im->stride + j3;
+
+            //////////////////////////////////////////////////
+            // 3.4
+            if (right_is_zero) {
+              im->buf[offs] = -nbd;
+#ifdef DO_DEBUG
+              printf("setting i3=%d, j3=%d to %d\n", i3, j3, im->buf[offs]);
+              debug_print_image(stdout, im);
+#endif
+            } else if (!right_is_zero && im->buf[offs] == 1) {
+              im->buf[offs] = nbd;
+#ifdef DO_DEBUG
+              printf("setting i3=%d, j3=%d to %d\n", i3, j3, im->buf[offs]);
+              debug_print_image(stdout, im);
+#endif
+            } 
+
+            //////////////////////////////////////////////////
+            // 3.5
+
+            if (i4 == i && j4 == j && i3 == i1 && j3 == j1) {
+              // done when next i3, j3 would be i, j
+#ifdef DO_DEBUG
+              printf("all done with %d\n", nbd);
+#endif
+              break;
+            } else {
+              i2 = i3; j2 = j3;
+              i3 = i4; j3 = j4;
+              // loop back to 3.3
+            }
+              
+          } // while following contour
+
+        } // found_nonzero
+        
+        zarray_add(contours, &cur_info);
+
+      } // is_border
+
+      // 4)
+
+      ccount_t afij = abs(f_i[j]);
+      if (afij > 1) {
+#ifdef DO_DEBUG
+        if (lnbd != abs(f_i[j])) {
+          printf("updating lnbd = %d\n", abs(f_i[j]));
+        }
+#endif
+        lnbd = afij;
+      }
+
+    } // for each col
+
+  } // for each row
+
+#ifdef DO_DEBUG
+
+  debug_print_image(stdout, im);
+
+#endif
+
+  cimage_destroy(im);
+  
+  return contours;
+
+}
+
+void contour_destroy(zarray_t* contours) {
+
+  int nc = zarray_size(contours);
+
+  for (int i=0; i<nc; ++i) {
+    contour_info_t* ci;
+    zarray_get_volatile(contours, i, &ci);
+    zarray_destroy(ci->points);
+  }
+  
+  zarray_destroy(contours);
+
+}
+
+static inline int compare_points(const void* va, const void* vb) {
+
+  const contour_point_t* pa = (const contour_point_t*)va;
+  const contour_point_t* pb = (const contour_point_t*)vb;
+
+  if (pa->x < pb->x) {
+    return -1;
+  } else if (pa->x > pb->x) {
+    return 1;
+  } else if (pa->y < pb->y) {
+    return -1;
+  } else {
+    return (pa->y > pb->y);
+  }
+
+}
+
+static inline int turn(const contour_point_t* p,
+                       const contour_point_t* q,
+                       const contour_point_t* r) {
+
+  return ( (q->x - p->x)*(r->y - p->y) - (r->x - p->x)*(q->y - p->y) );
+
+}
+
+size_t unique(void* base, size_t nel, size_t width, 
+              int(*compar)(const void*, const void*)) {
+
+  char* first = base;
+  const char* last = base + nel * width;
+
+  if (last == first) { 
+    return 0;
+  }
+
+  char* result = first;
+  size_t nout = 0;
+
+  while ((first += width) != last) {
+
+    if (compar(result, first)) {
+      result += width;
+      nout += 1;
+      memmove(result, first, width);
+    }
+
+  }
+
+  return nout + 1;
+
+}
+
+
+zarray_t* contour_convex_hull(const zarray_t* orig_points) {
+
+  zarray_t* sorted = zarray_copy(orig_points);
+
+  zarray_sort(sorted, compare_points);
+
+  int num_unique = unique(sorted->data, 
+                          sorted->size, 
+                          sizeof(contour_point_t), 
+                          compare_points);
+
+  assert(num_unique >= 0 && num_unique <= zarray_size(sorted));
+  zarray_truncate(sorted, num_unique);
+
+  if (zarray_size(sorted) < 3) {
+    // done!
+    return sorted;
+  }
+
+  //////////////////////////////////////////////////
+  // build top hull
+
+  zarray_t* dst = zarray_create(sizeof(contour_point_t));
+
+  for (int i=0; i<zarray_size(sorted); ++i) {
+
+    const contour_point_t* pi;
+    zarray_get_volatile(sorted, i, &pi);
+
+    while (zarray_size(dst) >= 2) {
+
+      const contour_point_t* d2;
+      const contour_point_t* d1;
+      
+      zarray_get_volatile(dst, zarray_size(dst)-2, &d2);
+      zarray_get_volatile(dst, zarray_size(dst)-1, &d1);
+
+      if (turn(d2, d1, pi) > 0) {
+        break;
+      }
+
+      zarray_truncate(dst, zarray_size(dst)-1);
+
+    }
+
+    zarray_add(dst, pi);
+
+  }
+
+  //////////////////////////////////////////////////
+  // now do lower hull
+
+  int tsize = zarray_size(dst);
+
+  for (int i=zarray_size(sorted)-1; i>=0; --i) {
+
+    const contour_point_t* pi;
+    zarray_get_volatile(sorted, i, &pi);
+
+    while (zarray_size(dst) >= tsize+2) {
+
+      const contour_point_t* d2;
+      const contour_point_t* d1;
+      
+      zarray_get_volatile(dst, zarray_size(dst)-2, &d2);
+      zarray_get_volatile(dst, zarray_size(dst)-1, &d1);
+
+      if (turn(d2, d1, pi) > 0) {
+        break;
+      }
+
+      zarray_truncate(dst, zarray_size(dst)-1);
+
+    }
+
+    zarray_add(dst, pi);
+
+  }
+
+  //////////////////////////////////////////////////
+  // remove 2 duplicate points
+
+  zarray_truncate(dst, zarray_size(dst)-1);
+
+  zarray_remove_index(dst, tsize, 0);
+
+  zarray_destroy(sorted);
+
+  return dst;
+
+}
+
+
+float contour_area_centroid(const zarray_t* points,
+                            float centroid[2]) {
+
+  int n = zarray_size(points);
+
+  float area = 0;
+
+  if (centroid) {
+    centroid[0] = centroid[1] = 0.0;
+  }
+
+  for (int p=0; p<n; ++p) {
+
+    const contour_point_t *pi, *pj;
+
+    zarray_get_volatile(points, p, &pi);
+    zarray_get_volatile(points, (p+1)%n, &pj);
+
+    float xi = pi->x;
+    float yi = pi->y;
+    float xj = pj->x;
+    float yj = pj->y;
+
+    float dij = xi * yj - xj * yi;
+
+    area += dij;
+    
+    if (centroid) {
+      centroid[0] += (int)(xi + xj) * dij;
+      centroid[1] += (int)(yi + yj) * dij;
+    }
+    
+  }
+
+  area *= 0.5;
+  
+  if (centroid) {
+    float cscl = 6.0*area;
+    centroid[0] /= cscl;
+    centroid[1] /= cscl;
+  }
+
+
+  return area;
+
+}
+
+static inline void outer_boundary_points(int start, int end,
+                                         int* nstart, int* ncount) {
+
+  assert(start >= 0 && start < NUM_NEIGHBORS);
+  assert(end >= 0 && end < NUM_NEIGHBORS);
+  
+  int diff_less_one = (end - start + NEIGHBOR_MASK + NUM_NEIGHBORS) & NEIGHBOR_MASK;
+  
+  if (start & 1) { // odd
+    *ncount = (diff_less_one+1) / 2;
+    *nstart = (start + 1) & NEIGHBOR_MASK;
+  } else { // even
+    *ncount = diff_less_one / 2;
+    *nstart = (start + 2) & NEIGHBOR_MASK;
+  }
+  
+  
+}
+  
+
+zarray_t* contour_outer_boundary(const contour_info_t* cinfo,
+                                 int start, int end) {
+
+  int n = zarray_size(cinfo->points);
+  if (n < 2) {
+    fprintf(stderr, "won't get outer boundary of array of size less than 2!\n");
+    return NULL;
+  }
+
+  int count;
+
+  if (start == -1 && end == -1) {
+    start = 0;
+    count = n;
+  } else {
+    count = end - start;
+    if (count < 0) {
+      count += n;
+    }
+  }
+
+  const conn_info_t* c = &the_cinfo;
+
+  const contour_point_t* p_cur;    
+  const contour_point_t* p_prev;
+
+  zarray_get_volatile(cinfo->points, (start+n-1)%n, &p_prev);
+  zarray_get_volatile(cinfo->points, start, &p_cur);
+
+  contour_point_t qprev = { -1, -1 };
+
+  zarray_t* outer = zarray_create(sizeof(contour_point_t));
+
+  for (int k=0; k<count; ++k) {
+    
+    const contour_point_t* p_next;
+    zarray_get_volatile(cinfo->points, (start+k+1)%n, &p_next);
+
+    // TODO: stuff
+    int n_prev = conn_lookup(c,
+                             p_cur->y, p_cur->x,
+                             p_prev->y, p_prev->x);
+
+    int n_next = conn_lookup(c,
+                             p_cur->y, p_cur->x,
+                             p_next->y, p_next->x);
+
+    int nstart, ncount;
+    outer_boundary_points(n_prev, n_next, &nstart, &ncount);
+
+    /*
+    {
+      printf("prev is x=%d, y=%d\n", p_prev->x, p_prev->y);
+      printf(" cur is x=%d, y=%d\n", p_cur->x, p_cur->y);
+      printf("next is x=%d, y=%d\n", p_next->x, p_next->y);
+      
+      printf("(%d, %d) -> [ ", n_prev, n_next);
+      int n = nstart;
+      for (int i=0; i<ncount; ++i) {
+        printf("%d ", n);
+        n = (n + 2) & NEIGHBOR_MASK;
+      }
+      printf("]\n");
+      printf("\n");
+    }
+    */
+
+    int n=nstart;
+
+    for (int i=0; i<ncount; ++i) {
+
+      contour_point_t q;
+      q.x = p_cur->x + c->dj[n];
+      q.y = p_cur->y + c->di[n];
+
+
+      if (q.x != qprev.x || q.y != qprev.y) {
+        zarray_add(outer, &q);
+        qprev = q;
+      } else {
+        int dx = (int)q.x - (int)qprev.x;
+        int dy = (int)q.y - (int)qprev.y;
+        if (!(dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1)) {
+          fprintf(stderr, "big skip!\n");
+          exit(1);
+        }
+      }
+      
+      n = (n + 2) & NEIGHBOR_MASK;
+      
+    }
+
+    
+    p_prev = p_cur;
+    p_cur = p_next;
+    
+  }
+
+  if (zarray_size(outer)) {
+    contour_point_t qbegin;
+    zarray_get(outer, 0, &qbegin);
+    if (qbegin.x == qprev.x && qbegin.y == qprev.y) {
+      zarray_truncate(outer, zarray_size(outer) - 1);
+    }
+  }
+
+  return outer;
+
+}
+
+
+
+void contour_test_outer() {
+
+
+  /*
+  Starting from 0:
+
+  +---+---+---+---+---+---+---+---+---+
+  |.o.|.o.|.o.|.o.|.o.|*o.|.*.|..*|567|
+  |o**|o**|o**|o**|***|.**|.**|.**|4X0|
+  |.o.|.o*|.*.|*..|...|...|...|...|321|
+  +---+---+---+---+---+---+---+---+---+
+   0,0 0,1 0,2 0,3 0,4 0,5 0,6 0,7
+  
+  (start, end) -> [ border pixels ]
+  (0,0) -> [ 6, 4, 2 ]
+  (0,1) -> [ 6, 4, 2 ]
+  (0,2) -> [ 6, 4 ]
+  (0,3) -> [ 6, 4 ]
+  (0,4) -> [ 6 ]
+  (0,5) -> [ 6 ]
+  (0,6) -> [ ]
+  (0,7) -> [ ]
+
+  +---+---+---+---+---+---+---+---+
+  |...|.o.|.o.|.o.|.o.|*o.|.*.|..*|
+  |.**|o*o|o*o|o*o|**o|.*o|.*o|.*o|
+  |..*|.o*|.**|*.*|..*|..*|..*|..*|
+  +---+---+---+---+---+---+---+---+
+   1,0 1,1 1,2 1,3 1,4 1,5 1,6 1,7 
+   
+   (1,0) -> [ ]
+   (1,1) -> [ 0, 6, 4, 2 ]
+   (1,2) -> [ 0, 6, 4 ]
+   (1,3) -> [ 0, 6, 4 ]
+   (1,4) -> [ 0, 6 ]
+   (1,5) -> [ 0 ]
+   (1,6) -> [ 0 ]
+
+   +---+---+---+---+---+---+---+---+
+   |...|...|.o.|.o.|.o.|*o.|.*.|..*|
+   |.**|.*.|o*o|o*o|**o|.*o|.*o|.*o|
+   |.*.|.**|.*.|**.|.*.|.*.|.*.|.*.|
+   +---+---+---+---+---+---+---+---+
+   
+   (2,0) -> [ ]
+   (2,1) -> [ ]
+   (2,2) -> [ 0, 6, 4 ]
+   (2,3) -> [ 0, 6, 4 ]
+   (2,4) -> [ 0, 6 ]
+   (2,5) -> [ 0, 6 ]
+   (2,6) -> [ 0 ]
+   (2,7) -> [ 0 ]
+   
+ */
+
+  for (int start=0; start<NUM_NEIGHBORS; ++start) {
+    for (int end=0; end<NUM_NEIGHBORS; ++end) {
+
+      int nstart, ncount;
+      outer_boundary_points(start, end, &nstart, &ncount);
+      
+      printf("(%d, %d) -> [ ", start, end);
+      int n = nstart;
+      for (int i=0; i<ncount; ++i) {
+        printf("%d ", n);
+        n = (n + 2) & NEIGHBOR_MASK;
+      }
+      printf("]\n");
+      
+    }
+
+    printf("\n");
+        
+  }
+
+}
