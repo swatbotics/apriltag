@@ -584,14 +584,12 @@ int main(int argc, char *argv[]) {
       zarray_get_volatile(quads, i, &qi);
       cv::Point pts[4];
 
-      /*
-      std::cout << "p = { ";
+      //std::cout << "p = { ";
       for (int j=0; j<4; ++j) {
         pts[j] = cv::Point(qi->p[j][0], qi->p[j][1]);
-        std::cout << (j ? ", " : "") << pts[j];
+        //std::cout << (j ? ", " : "") << pts[j];
       }
-      std::cout << " }\n";
-      */
+      //std::cout << " }\n";
 
       const cv::Point* cpts = pts;
       int npts = 4;
