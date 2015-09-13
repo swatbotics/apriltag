@@ -51,7 +51,6 @@ int main(int argc, char *argv[])
 
     getopt_add_bool(getopt, 'h', "help", 0, "Show this help");
     getopt_add_bool(getopt, 'd', "debug", 0, "Enable debugging output (slow)");
-    getopt_add_bool(getopt, 'c', "contours", 0, "Use new contour-based quad detection");
     getopt_add_bool(getopt, 'q', "quiet", 0, "Reduce output");
     getopt_add_string(getopt, 'f', "family", "tag36h11", "Tag family to use");
     getopt_add_int(getopt, '\0', "border", "1", "Set tag family border size");
@@ -61,7 +60,9 @@ int main(int argc, char *argv[])
     getopt_add_bool(getopt, '0', "refine-edges", 1, "Spend more time trying to align edges of tags");
     getopt_add_bool(getopt, '1', "refine-decode", 0, "Spend more time trying to decode tags");
     getopt_add_bool(getopt, '2', "refine-pose", 0, "Spend more time trying to precisely localize tags");
+    getopt_add_bool(getopt, 'c', "contours", 0, "Use new contour-based quad detection");
     getopt_add_bool(getopt, 'n', "no-gui", 0, "Suppress GUI output from OpenCV");
+    getopt_add_bool(getopt, 'B', "benchmark", 0, "Do benchmarking (assumes -n and -q)");
 
     if (!getopt_parse(getopt, argc, argv, 1) || getopt_get_bool(getopt, "help")) {
         printf("Usage: %s [options] <input files>\n", argv[0]);
@@ -109,6 +110,16 @@ int main(int argc, char *argv[])
 
     int nogui = getopt_get_bool(getopt, "no-gui");
 
+    int benchmark = getopt_get_bool(getopt, "benchmark");
+    
+    if (benchmark) {
+      quiet = 1;
+      nogui = 1;
+    }
+
+    int total_detections = 0;
+    uint64_t total_time = 0;
+
     const int hamm_hist_max = 10;
 
     for (int input = 0; input < zarray_size(inputs); input++) {
@@ -118,8 +129,14 @@ int main(int argc, char *argv[])
 
       char *path;
       zarray_get(inputs, input, &path);
-      if (!quiet)
+
+      if (benchmark) {
+        int l=strlen(path);
+        while (l && path[l-1] != '/') { --l; }
+        printf("%s", path+l);
+      } else if (!quiet) {
         printf("loading %s\n", path);
+      }
 
       cv::Mat orig = cv::imread(path);
             
@@ -141,29 +158,27 @@ int main(int argc, char *argv[])
       zarray_t *detections = apriltag_detector_detect(td, im8);
       
       cv::Mat display = cv::Mat::zeros(orig.size(), orig.type());
+      
+      total_detections += zarray_size(detections);
 
       for (int i = 0; i < zarray_size(detections); i++) {
         apriltag_detection_t *det;
         zarray_get(detections, i, &det);
 
-        if (!quiet)
-          printf("detection %3d: id (%2dx%2d)-%-4d, hamming %d, goodness %8.3f, margin %8.3f\n",
-                 i, det->family->d*det->family->d, det->family->h, det->id, det->hamming, det->goodness, det->decision_margin);
+        if (benchmark) {
+          printf(" %d", det->id);
+        } else if (!quiet) {
+          printf("detection %3d: id (%2dx%2d)-%-4d, hamming %d, "
+                 "goodness %8.3f, margin %8.3f\n",
+                 i, det->family->d*det->family->d, det->family->h,
+                 det->id, det->hamming, det->goodness, det->decision_margin);
+        }
 
         hamm_hist[det->hamming]++;
         
         if (!nogui) {
           cv::Mat dimg = detectionImage(det, orig.size(), orig.type());
           display = cv::max(display, dimg);
-
-          /*
-          fprintf(stderr, "p = {");
-          for (int i=0; i<4; ++i) {
-            fprintf(stderr, "%s(%.1f, %.1f)", i ? ", " : " ", det->p[i][0], det->p[i][1]);
-          }
-          fprintf(stderr, " }\n\n");
-          */
-
         }
 
       }
@@ -171,21 +186,29 @@ int main(int argc, char *argv[])
       apriltag_detections_destroy(detections);
       image_u8_destroy(im8);
 
-      if (!quiet) {
-        timeprofile_display(td->tp);
-        printf("nedges: %d, nsegments: %d, nquads: %d\n", td->nedges, td->nsegments, td->nquads);
+      total_time += timeprofile_total_utime(td->tp);
+
+      if (!benchmark) {
+
+        if (!quiet) {
+          timeprofile_display(td->tp);
+          printf("nedges: %d, nsegments: %d, nquads: %d\n",
+                 td->nedges, td->nsegments, td->nquads);
+        }
+
+        if (!quiet)
+          printf("Hamming histogram: ");
+
+        for (int i = 0; i < hamm_hist_max; i++)
+          printf("%5d", hamm_hist[i]);
+
+        if (quiet) {
+          printf("%12.3f", timeprofile_total_utime(td->tp) / 1.0E3);
+        }
+        
+
       }
-
-      if (!quiet)
-        printf("Hamming histogram: ");
-
-      for (int i = 0; i < hamm_hist_max; i++)
-        printf("%5d", hamm_hist[i]);
-
-      if (quiet) {
-        printf("%12.3f", timeprofile_total_utime(td->tp) / 1.0E3);
-      }
-
+      
       printf("\n");
 
       if (!nogui) {
@@ -196,6 +219,12 @@ int main(int argc, char *argv[])
         cv::waitKey();
       }
 
+    }
+
+    if (benchmark) {
+      fprintf(stderr, "%d detections over %d images in %.3f ms (%.3f ms per frame)\n",
+              total_detections, zarray_size(inputs),
+              (total_time*1e-3), (total_time*1e-3)/zarray_size(inputs));
     }
 
     // don't deallocate contents of inputs; those are the argv
