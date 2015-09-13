@@ -5,9 +5,9 @@ set(sources
   common/image_u8.c common/pnm.c common/image_f32.c common/image_u32.c 
   common/workerpool.c common/time_util.c common/svd22.c 
   common/homography.c common/string_util.c common/getopt.c
-  contrib/box.c contrib/contour.c)
+  contrib/box.c contrib/contour.c contrib/apriltag_quad_contour.c)
 
-include_directories(common contrib)
+include_directories(common contrib .)
 
 add_library(apriltag ${sources})
 
