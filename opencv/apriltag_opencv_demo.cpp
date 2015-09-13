@@ -62,7 +62,7 @@ int main(int argc, char *argv[])
     getopt_add_bool(getopt, '2', "refine-pose", 0, "Spend more time trying to precisely localize tags");
     getopt_add_bool(getopt, 'c', "contours", 0, "Use new contour-based quad detection");
     getopt_add_bool(getopt, 'n', "no-gui", 0, "Suppress GUI output from OpenCV");
-    getopt_add_bool(getopt, 'B', "benchmark", 0, "Do benchmarking (assumes -n and -q)");
+    getopt_add_bool(getopt, 'B', "benchmark", 0, "Benchmark mode (assumes -n)");
 
     if (!getopt_parse(getopt, argc, argv, 1) || getopt_get_bool(getopt, "help")) {
         printf("Usage: %s [options] <input files>\n", argv[0]);
@@ -113,7 +113,6 @@ int main(int argc, char *argv[])
     int benchmark = getopt_get_bool(getopt, "benchmark");
     
     if (benchmark) {
-      quiet = 1;
       nogui = 1;
     }
 
@@ -184,9 +183,6 @@ int main(int argc, char *argv[])
       }
 
       apriltag_detections_destroy(detections);
-      image_u8_destroy(im8);
-
-      total_time += timeprofile_total_utime(td->tp);
 
       if (!benchmark) {
 
@@ -218,6 +214,9 @@ int main(int argc, char *argv[])
         cv::imshow("foo", display);
         cv::waitKey();
       }
+
+      image_u8_destroy(im8);
+      total_time += timeprofile_total_utime(td->tp);
 
     }
 
