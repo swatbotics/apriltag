@@ -118,6 +118,34 @@ struct apriltag_quad_thresh_params
     int deglitch;
 };
 
+struct apriltag_quad_contour_params
+{
+
+  // neighborhood size for adaptive threshold 
+  int threshold_neighborhood_size;
+
+  // threshold value for adaptive threshold
+  int threshold_value;
+
+  // minimum length of side 
+  int min_side_length; 
+
+  // minimum aspect ratio of quadrilateral 
+  float min_aspect;
+
+  // how far is a point allowed to be from a quad boundary (as a
+  // fraction of quad diameter) 
+  float point_dist_diam_scl;
+
+  // how far is a point allowed to be from a quad boundary (affine offset) 
+  float point_dist_bias;
+
+  // we need the outer (light) edge to be at least this much brighter
+  // than the inner (dark) edge. 
+  double contour_margin;
+  
+};
+
 // Represents a detector object. Upon creating a detector, all fields
 // are set to reasonable values, but can be overridden by accessing
 // these fields.

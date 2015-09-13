@@ -37,7 +37,11 @@ inline void xyw_accum(xyw_moments_t* m,
 
 void line_init_from_xyw(const xyw_moments_t* m, g2d_line_t* line);
 
-zarray_t* quads_from_contours(const image_u8_t* im, const zarray_t* contours);
+void apriltag_quad_contour_defaults(struct apriltag_quad_contour_params* qcp);
+
+
+zarray_t* quads_from_contours(const image_u8_t* im, const zarray_t* contours,
+                              const struct apriltag_quad_contour_params* qcp);
 
 #ifdef __cplusplus
 }

@@ -306,6 +306,9 @@ int main(int argc, char *argv[]) {
 
   const zarray_t *inputs = getopt_get_extra_args(getopt);
 
+  struct apriltag_quad_contour_params qcp;
+  apriltag_quad_contour_defaults(&qcp);
+
   for (int input=0; input<zarray_size(inputs); ++input) {
 
     char *path;
@@ -330,7 +333,10 @@ int main(int argc, char *argv[]) {
 
     //////////////////////////////////////////////////////////////////////
 
-    box_threshold(im, t8, 255, 1, 15, 5);
+    box_threshold(im, t8, 255, 1,
+                  qcp.threshold_neighborhood_size,
+                  qcp.threshold_value);
+    
     timeprofile_stamp(tp, "threshold");
 
     //////////////////////////////////////////////////////////////////////
@@ -341,7 +347,7 @@ int main(int argc, char *argv[]) {
     //////////////////////////////////////////////////////////////////////
     // also parallelizable
 
-    zarray_t* quads = quads_from_contours(im, contours);
+    zarray_t* quads = quads_from_contours(im, contours, &qcp);
     timeprofile_stamp(tp, "quads from contours");
 
     //////////////////////////////////////////////////////////////////////
@@ -352,7 +358,6 @@ int main(int argc, char *argv[]) {
 
     std::vector<cv::Point> points;
       
-    /*
 
     cv::Mat contour_display = orig * 0.75;
     cv::Mat outer_display = orig * 0.75;
@@ -399,7 +404,6 @@ int main(int argc, char *argv[]) {
       }
 
     }
-    */
 
     cv::Mat arrow_display = orig * 0.75;
 

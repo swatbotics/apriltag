@@ -294,6 +294,27 @@ double sample_gradient_xyw(const image_u8_t* im,
   
 }
 
+static inline float turn(const float p[2],
+                         const float q[2],
+                         const float r[2]) {
+
+  return ( (q[0] - p[0])*(r[1] - p[1]) - (r[0] - p[0])*(q[1] - p[1]) );
+  
+}
+
+void apriltag_quad_contour_defaults(struct apriltag_quad_contour_params* qcp) {
+
+  qcp->threshold_neighborhood_size = 15;
+  qcp->threshold_value = 5;
+  qcp->min_side_length = 8;
+  qcp->min_aspect = 0.3;
+  qcp->point_dist_diam_scl = 0.03;
+  qcp->point_dist_bias = 2.0;
+  qcp->contour_margin = 10.0;
+  
+}
+
+
 // for easy2.png, orig apriltags identifies corners at (basically):
 // 
 //   p = { (36, 19), (59, 19), (59, 42), (36, 42) }
@@ -310,7 +331,9 @@ double sample_gradient_xyw(const image_u8_t* im,
 // different than winding order for the contour. NBD.
 //
 zarray_t* quads_from_contours(const image_u8_t* im,
-                              const zarray_t* contours) {
+                              const zarray_t* contours,
+                              const struct apriltag_quad_contour_params* qcp) {
+
 
   zarray_t* quads = zarray_create(sizeof(struct quad));
 
@@ -319,14 +342,16 @@ zarray_t* quads_from_contours(const image_u8_t* im,
     contour_info_t* ci;
     zarray_get_volatile(contours, c, &ci);
 
-    if (ci->is_outer && zarray_size(ci->points) >= 32) {
+    const int min_perimeter = 4*qcp->min_side_length;
+    const float min_area = qcp->min_side_length * qcp->min_side_length;
+      
+    if (ci->is_outer && zarray_size(ci->points) >= min_perimeter) {
 
       float ctr[2];
-      float area = contour_area_centroid(ci->points, ctr);
-      area = fabs(area);
+      float area = fabs(contour_area_centroid(ci->points, ctr));
 
       // area check
-      if (area < 64) { continue; }
+      if (area < min_area) { continue; }
 
       struct quad q;
       int idx[4];
@@ -335,7 +360,7 @@ zarray_t* quads_from_contours(const image_u8_t* im,
       fit_quad(ci->points, ctr, &q, idx, &l, &w);
       
       // diagonal aspect ratio check
-      if (w < 0.3*l) { continue; }
+      if (w < qcp->min_aspect*l) { continue; }
 
       float sides[4][2];
       float lmin, lmax;
@@ -343,13 +368,12 @@ zarray_t* quads_from_contours(const image_u8_t* im,
       get_quad_sides(&q, sides, &lmin, &lmax);
 
       // side aspect ratio check
-      if (lmin < 0.3*lmax || lmin < 8) { continue; }
+      if (lmin < qcp->min_aspect*lmax || lmin < qcp->min_side_length) { continue; }
 
       // max dist from quad check
       float dmax = get_max_quad_dist(ci->points, sides, &q);
-      if (dmax > 0.03*l+2) { continue; }
+      if (dmax > qcp->point_dist_diam_scl*l+qcp->point_dist_bias) { continue; }
       
-
       int n = zarray_size(ci->points);
 
       /*
@@ -387,14 +411,13 @@ zarray_t* quads_from_contours(const image_u8_t* im,
 
         zarray_destroy(outer);
 
-        if ((mean_outer - mean_inner) < 10.0) {
+        if ((mean_outer - mean_inner) < qcp->contour_margin) {
           ok = 0;
         } else {
           line_init_from_xyw(&moments, lines+i);
         }
         
       }
-
 
       if (!ok) { continue; }
 
@@ -406,8 +429,20 @@ zarray_t* quads_from_contours(const image_u8_t* im,
         q.p[3-i][1] = p[1] + 0.5;
       }
 
-      zarray_add(quads, &q);
       
+      for (int i=0; ok && i<4; ++i) {
+        int j = (i+1)&3;
+        int k = (i+2)&3;
+        float tval = turn(q.p[i], q.p[j], q.p[k]);
+        if (tval < 0) {
+          ok = 0;
+          break;
+        }
+      }
+
+      if (ok) {
+        zarray_add(quads, &q);
+      }
       
     }
 
