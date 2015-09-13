@@ -30,11 +30,11 @@ zarray_t* contour_convex_hull(const zarray_t* orig_points);
 float contour_area_centroid(const zarray_t* points,
                             float centroid[2]);
 
-// can pass in start/end as -1 if you want.
 // returns array of contour_point_t, caller must deallocate
+// ok for [start, start+count) to wrap around end of contour
 zarray_t* contour_outer_boundary(const contour_info_t* c,
                                  int start,
-                                 int end);
+                                 int count);
 
 #ifdef __cplusplus
 }

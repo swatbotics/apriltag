@@ -150,13 +150,13 @@ int main(int argc, char *argv[])
         if (!nogui) {
           cv::Mat dimg = detectionImage(det, orig.size(), orig.type());
           display = cv::max(display, dimg);
-          /*
-          fprintf(stderr, "p = { ");
+
+          fprintf(stderr, "p = {");
           for (int i=0; i<4; ++i) {
-            fprintf(stderr, "%s(%f, %f)", i ? ", " : " ", det->p[i][0], det->p[i][1]);
+            fprintf(stderr, "%s(%.1f, %.1f)", i ? ", " : " ", det->p[i][0], det->p[i][1]);
           }
-          fprintf(stderr, " }\n");
-          */
+          fprintf(stderr, " }\n\n");
+
         }
 
       }

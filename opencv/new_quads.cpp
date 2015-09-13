@@ -2,6 +2,7 @@
 #include "getopt.h"
 #include "contour.h"
 #include "box.h"
+#include "g2d.h"
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <iostream>
@@ -21,26 +22,122 @@
    4) instead of explicitly padding, compute what padded table lookup ought to be
 
 
+   How to fit a line to a set of weighted points in a single pass?
+
+          sum_i w_i * x_i
+   m_x = -----------------
+             sum_i w_i
+
  */
 
 
+typedef struct xyw_moments {
+  double n;
+  double mX;
+  double mY;
+  double mXX;
+  double mYY;
+  double mXY;
+} xyw_moments_t;
+
+
+inline void xyw_accum(xyw_moments_t* m,
+                      double x, double y, double w) {
+
+  //printf("%f %f %f\n", x, y, w);
+  
+  m->n += w;
+
+  m->mX += x*w;
+  m->mY += y*w;
+  
+  m->mXX += x*x*w;
+  m->mYY += y*y*w;
+  m->mXY += x*y*w;
+  
+}
+
+inline void line_init_from_xyw(const xyw_moments_t* m,
+                               g2d_line_t* line) {
+
+  /*
+  printf("n=%f, mX=%f, mY=%f, mXX=%f, mYY=%f, mXY=%f\n",
+         m->n, m->mX, m->mY, m->mXX, m->mYY, m->mXY);
+  */
+
+  line->p[0] = m->mX / m->n;
+  line->p[1] = m->mY / m->n;
+
+  double Cxx = m->mXX/m->n - (m->mX/m->n)*(m->mX/m->n);
+  double Cyy = m->mYY/m->n - (m->mY/m->n)*(m->mY/m->n);
+  double Cxy = m->mXY/m->n - (m->mX/m->n)*(m->mY/m->n);
+
+  double a = Cxx;
+  double b = Cxy;
+  double c = Cyy;
+
+  if (b == 0) {
+
+    if (a > c) {
+
+      line->u[0] = 1;
+      line->u[1] = 0;
+
+    } else {
+
+      line->u[0] = 0;
+      line->u[1] = 1;
+
+    }
+
+  } else {
+
+    // get (0,0) as eigenvector :(
+    double d = c*c - 2*a*c + 4*b*b + a*a;
+  
+    double v2x = sqrt(d)-c+a;
+    double v2y = 2*b;
+  
+    double v2mag = sqrt(v2x*v2x + v2y*v2y);
+
+    line->u[0] = v2x/v2mag;
+    line->u[1] = v2y/v2mag;
+
+  } 
+  
+
+}
+
 cv::Scalar random_color() {
-  
-  cv::RNG& rng = cv::theRNG();
-  
-  cv::Scalar color = CV_RGB(rng.uniform(127, 256),
-                            rng.uniform(127, 256),
-                            rng.uniform(127, 256));
 
-  color[rng.uniform(0,3)] = 0;
+  double h = cv::theRNG().uniform(0.0, 1.0) * 6.0;
 
-  return color;
+  cv::Scalar rval;
+
+  for (int i=0; i<3; ++i) {
+    double ci = fmod(h + 2.0*i, 6.0);
+    if (ci < 0.0 || ci > 6.0) {
+      std::cerr << "ci = " << ci << "\n";
+      exit(1);
+    }
+    ci = std::min(ci, 4.0-ci);
+    ci = std::max(0.0, std::min(ci, 1.0));
+    rval[i] = ci*255;
+  }
+
+  return rval;
 
 }
 
 cv::Point scale_point(int x, int y, int u) {
   int b = u/2;
   return cv::Point(x*u + b, y*u + b);
+}
+
+cv::Point scale_point(const cv::Point2f p, int u, int shift) {
+  int b = u/2;
+  u *= (1 << shift);
+  return cv::Point(p.x*u + b + 0.5, p.y*u + b + 0.5);
 }
 
 void contour_to_points(const zarray_t* cpoints,
@@ -55,6 +152,32 @@ void contour_to_points(const zarray_t* cpoints,
     points.push_back(scale_point(p->x, p->y, upscale));
   }
 
+}
+
+void arrow(cv::Mat image,
+           const cv::Point2f& p0,
+           const cv::Point2f& p1,
+           const cv::Scalar& color,
+           int u=1) {
+
+  cv::Point2f d10 = p1-p0;
+  d10 /= sqrt(d10.x*d10.x + d10.y*d10.y);
+
+  cv::Point2f n(d10.y, -d10.x);
+
+  int shift = 4;
+  
+  cv::Point a = scale_point(p0, u, shift);
+  cv::Point b = scale_point(p1, u, shift);
+  cv::Point c = scale_point(p1 - 4*d10 - 2*n, u, shift);
+  cv::Point d = scale_point(p1 - 4*d10 + 2*n, u, shift);
+
+  cv::line(image, a, b, color, 1, CV_AA, shift);
+  cv::line(image, b, c, color, 1, CV_AA, shift);
+  cv::line(image, b, d, color, 1, CV_AA, shift);
+  
+  
+  
 }
 
 void polylines(cv::Mat image,
@@ -417,6 +540,53 @@ float get_max_quad_dist(const zarray_t* points,
   
 }
 
+double sample_gradient_xyw(const image_u8_t* im, 
+                           const zarray_t* points,
+                           int start,
+                           int count,
+                           xyw_moments_t* moments) {
+
+  int n = zarray_size(points);
+
+  const int up = -im->stride;
+  const int dn =  im->stride;
+  const int lt = -1;
+  const int rt =  1;
+
+  double isum = 0.0;
+  double wsum = 0.0;
+
+  for (int k=0; k<count; ++k) {
+
+    int i = (start+k)%n;
+
+    const contour_point_t* p;
+    zarray_get_volatile(points, i, &p);
+
+    // TODO: deal
+    if (p->x == 0 || p->x == im->width-1 ||
+        p->y == 0 || p->y == im->height-1) {
+      continue;
+    }
+
+    int offs = p->x + im->stride*p->y;
+    
+    double gx = im->buf[offs+rt] - im->buf[offs+lt];
+    double gy = im->buf[offs+dn] - im->buf[offs+up];
+
+    double w = sqrt(gx*gx + gy*gy);
+
+    isum += im->buf[offs]*w;
+    wsum += w;
+
+    xyw_accum(moments, p->x, p->y, w);
+    
+  }
+
+  return isum / wsum;
+  
+}
+
 // for easy2.png, orig apriltags identifies corners at (basically):
 // 
 //   p = { (36, 19), (59, 19), (59, 42), (36, 42) }
@@ -432,7 +602,8 @@ float get_max_quad_dist(const zarray_t* points,
 // which is great. only caveat is winding order for quad is 
 // different than winding order for the contour. NBD.
 //
-zarray_t* extract_rough_quads(const zarray_t* contours) {
+zarray_t* quads_from_contours(const image_u8_t* im,
+                              const zarray_t* contours) {
 
   zarray_t* quads = zarray_create(sizeof(struct quad));
 
@@ -465,12 +636,13 @@ zarray_t* extract_rough_quads(const zarray_t* contours) {
       get_quad_sides(&q, sides, &lmin, &lmax);
 
       // side aspect ratio check
-      if (lmin < 0.3*lmax) { continue; }
+      if (lmin < 0.3*lmax || lmin < 8) { continue; }
 
       // max dist from quad check
       float dmax = get_max_quad_dist(ci->points, sides, &q);
       if (dmax > 0.03*l+2) { continue; }
       
+
       int n = zarray_size(ci->points);
 
       /*
@@ -483,9 +655,50 @@ zarray_t* extract_rough_quads(const zarray_t* contours) {
       printf("\n");
       */
 
-      zarray_t* outer = contour_outer_boundary(ci, -1, -1);
-      zarray_destroy(outer);
-      
+      int ok = 1;
+
+      g2d_line_t lines[4];
+
+      for (int i=0; ok && i<4; ++i) {
+        
+        int j = (i+1)%4;
+        int start = idx[i];
+        int count = (idx[j]-idx[i]+n)%n;
+        
+        assert( count >= 8 );
+        start = (start + 2) % n;
+        count -= 4;
+
+        xyw_moments_t moments;
+        memset(&moments, 0, sizeof(moments));
+
+        zarray_t* outer = contour_outer_boundary(ci, start, count);
+
+        double mean_outer, mean_inner;
+        mean_inner = sample_gradient_xyw(im, ci->points, start, count, &moments);
+        mean_outer = sample_gradient_xyw(im, outer, 0, zarray_size(outer), &moments);
+
+        zarray_destroy(outer);
+
+        if ((mean_outer - mean_inner) < 10.0) {
+          ok = 0;
+        } else {
+          line_init_from_xyw(&moments, lines+i);
+        }
+        
+      }
+
+
+      if (!ok) { continue; }
+
+      for (int i=0; i<4; ++i) {
+        int j = (i+1)&3; // note reverse order!
+        double p[2];
+        g2d_line_intersect_line(lines+i, lines+j, p);
+        q.p[3-i][0] = p[0] + 0.5;
+        q.p[3-i][1] = p[1] + 0.5;
+      }
+
       zarray_add(quads, &q);
       
       
@@ -533,7 +746,7 @@ void test_outer() {
       cv::Scalar color = random_color();
       polylines(big1, ci->points, color, true, scl);
 
-      zarray_t* outer = contour_outer_boundary(ci, -1, -1);
+      zarray_t* outer = contour_outer_boundary(ci, 0, zarray_size(ci->points));
 
       polylines(big2, outer, color, false, scl);
 
@@ -554,9 +767,67 @@ void test_outer() {
 
 }
 
+void test_xyw_fit() {
 
-extern "C" {
-void contour_test_outer();
+  cv::RNG& rng = cv::theRNG();
+
+  for (int iter=0; iter<2; ++iter) {
+
+    double theta = rng.uniform(0.0, 2.0*M_PI);
+    double u[2] = { cos(theta), sin(theta) };
+
+    if (iter == 0) {
+      u[0] = 1.0;
+      u[1] = 0.0;
+    } else if (iter == 1) {
+      u[0] = 0.0;
+      u[1] = 1.0;
+    }
+
+    double p[2] = { rng.uniform(0.0, 10.0), rng.uniform(0.0, 10.0) };
+
+    double l = rng.uniform(2.0, 10.0);
+
+    xyw_moments_t m;
+    memset(&m, 0, sizeof(m));
+
+    for (int n=0; n<8; ++n) {
+
+      double k = rng.uniform(0.0, l);
+      double w = rng.uniform(1.0, 10.0);
+
+      for (double sign=-1; sign<=1; sign+=2) {
+        double x = p[0] + u[0]*k*sign;
+        double y = p[1] + u[1]*k*sign;
+        xyw_accum(&m, x, y, w);
+      }
+      
+    }
+
+    g2d_line_t line;
+    line_init_from_xyw(&m, &line);
+
+    double dp = u[0]*line.u[0] + u[1]*line.u[1];
+    if (dp < 0) {
+      dp = -dp;
+      line.u[0] = -line.u[0];
+      line.u[1] = -line.u[1];
+    }
+
+    printf("orig: u=(%f, %f), p=(%f, %f)\n",
+           u[0], u[1], p[0], p[1]);
+
+    printf("fit:  u=(%f, %f), p=(%f, %f), dp=%f\n\n",
+           line.u[0], line.u[1], line.p[0], line.p[1], dp);
+
+    if (dp < 1-1e-6) {
+      fprintf(stderr, "fit failed!\n");
+      exit(1);
+    }
+    
+  }
+
+  
 }
 
 int main(int argc, char *argv[]) {
@@ -572,6 +843,9 @@ int main(int argc, char *argv[]) {
   test_box();
   return 0;
   */
+
+  //test_xyw_fit();
+  //return 0;
 
   getopt_t *getopt = getopt_create();
 
@@ -600,7 +874,8 @@ int main(int argc, char *argv[]) {
       orig.copyTo(gray);
     }
 
-    image_u8_t* t8 = cv2im8_copy(gray);
+    image_u8_t* im = cv2im8_copy(gray);
+    image_u8_t* t8 = image_u8_create(im->width, im->height);
     
     //////////////////////////////////////////////////////////////////////
 
@@ -608,7 +883,7 @@ int main(int argc, char *argv[]) {
 
     //////////////////////////////////////////////////////////////////////
 
-    box_threshold(t8, t8, 255, 1, 15, 5);
+    box_threshold(im, t8, 255, 1, 15, 5);
     timeprofile_stamp(tp, "threshold");
 
     //////////////////////////////////////////////////////////////////////
@@ -617,29 +892,9 @@ int main(int argc, char *argv[]) {
     timeprofile_stamp(tp, "contour");
 
     //////////////////////////////////////////////////////////////////////
-    // convex hulling could be parallized easily (OTOH it's fast)
-    // don't seem to need it to get reasonable quads
-    // OTOH convexity defect is a good rejection?
-
-    /*
-    for (int c=0; c<zarray_size(contours); ++c) {
-      contour_info_t* ci;
-      zarray_get_volatile(contours, c, &ci);
-      if (ci->is_outer) {
-        zarray_t* cvx_points = contour_convex_hull(ci->points);
-        zarray_destroy(ci->points);
-        ci->points = cvx_points;
-      }
-    }
-
-    timeprofile_stamp(tp, "cvx hull");
-    */
-
-    //////////////////////////////////////////////////////////////////////
     // also parallelizable
 
-    zarray_t* quads = extract_rough_quads(contours);
-
+    zarray_t* quads = quads_from_contours(im, contours);
     timeprofile_stamp(tp, "rough quads");
 
     //////////////////////////////////////////////////////////////////////
@@ -650,9 +905,10 @@ int main(int argc, char *argv[]) {
 
     std::vector<cv::Point> points;
       
-    cv::Mat display1 = orig * 0.25;
-    cv::Mat display1b = display1.clone();
-    cv::Mat display2 = display1.clone();
+    /*
+
+    cv::Mat contour_display = orig * 0.75;
+    cv::Mat outer_display = orig * 0.75;
 
     for (int c=0; c<zarray_size(contours); ++c) {
 
@@ -668,11 +924,11 @@ int main(int argc, char *argv[]) {
 
           cv::Scalar color = random_color();
 
-          polylines(display1, ci->points, color);
+          polylines(contour_display, ci->points, color);
 
           zarray_t* bpoints = contour_outer_boundary(ci, 0, zarray_size(ci->points));
 
-          polylines(display1b, bpoints, color);
+          polylines(outer_display, bpoints, color);
 
 
           char buf[1024];
@@ -685,10 +941,10 @@ int main(int argc, char *argv[]) {
           ctr[0] -= s.width/2;
           ctr[1] += s.height/2;
 
-          cv::putText(display1, buf, cv::Point(ctr[0], ctr[1]),
+          cv::putText(contour_display, buf, cv::Point(ctr[0], ctr[1]),
                       cv::FONT_HERSHEY_SIMPLEX, 0.4, CV_RGB(0,0,0), 3, CV_AA);
 
-          cv::putText(display1, buf, cv::Point(ctr[0], ctr[1]),
+          cv::putText(contour_display, buf, cv::Point(ctr[0], ctr[1]),
                       cv::FONT_HERSHEY_SIMPLEX, 0.4, color, 1, CV_AA);
 
         }
@@ -696,34 +952,36 @@ int main(int argc, char *argv[]) {
       }
 
     }
+    */
+
+    cv::Mat arrow_display = orig * 0.75;
+    
 
     for (int i=0; i<zarray_size(quads); ++i) {
 
       struct quad* qi;
       zarray_get_volatile(quads, i, &qi);
-      cv::Point pts[4];
 
-      //std::cout << "p = { ";
-      for (int j=0; j<4; ++j) {
-        pts[j] = cv::Point(qi->p[j][0], qi->p[j][1]);
-        //std::cout << (j ? ", " : "") << pts[j];
+      fprintf(stderr, "p = {");
+      for (int i=0; i<4; ++i) {
+        fprintf(stderr, "%s(%.1f, %.1f)", i ? ", " : " ", qi->p[i][0], qi->p[i][1]);
       }
-      //std::cout << " }\n";
+      fprintf(stderr, " }\n\n");
 
-      const cv::Point* cpts = pts;
-      int npts = 4;
 
-      cv::RNG& rng = cv::theRNG();
-      cv::Scalar color = CV_RGB(rng.uniform(127, 256),
-                                rng.uniform(127, 256),
-                                rng.uniform(127, 256));
+      cv::Point2f pts[4];
+      for (int j=0; j<4; ++j) {
+        pts[j] = cv::Point2f(qi->p[j][0], qi->p[j][1]);
+      }
 
-      cv::polylines(display2, &cpts, &npts, 1, true, color, 1);
+      cv::Scalar color = random_color();
+
+      for (int j=0; j<4; ++j) {
+        arrow(arrow_display, pts[j], pts[(j+1)&3], color);
+      }
 
     }
 
-    contour_destroy(contours);
-    zarray_destroy(quads);
 
     // filtering: ratio of orig area to hull area should be > 0.8 ?
     // hull area should be greater than # of pixels
@@ -733,21 +991,25 @@ int main(int argc, char *argv[]) {
     cv::imshow("win", orig);
     cv::waitKey();
 
-    Mat8uc1 thresh = im2cv(t8);
-
-    cv::imshow("win", thresh);
+    /*
+    cv::imshow("win", im2cv(t8));
     cv::waitKey();
 
-    cv::imshow("win", display1);
+    cv::imshow("win", contour_display);
     cv::waitKey();
     
-    cv::imshow("win", display1b);
+    cv::imshow("win", outer_display);
+    cv::waitKey();
+    */
+
+    cv::imshow("win", arrow_display);
     cv::waitKey();
 
-    cv::imshow("win", display2);
-    cv::waitKey();
+    zarray_destroy(quads);
+    contour_destroy(contours);
 
     image_u8_destroy(t8);
+    image_u8_destroy(im);
 
   }
 

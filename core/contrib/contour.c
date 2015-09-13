@@ -716,24 +716,12 @@ static inline void outer_boundary_points(int start, int end,
   
 
 zarray_t* contour_outer_boundary(const contour_info_t* cinfo,
-                                 int start, int end) {
+                                 int start, int count) {
 
   int n = zarray_size(cinfo->points);
   if (n < 2) {
     fprintf(stderr, "won't get outer boundary of array of size less than 2!\n");
     return NULL;
-  }
-
-  int count;
-
-  if (start == -1 && end == -1) {
-    start = 0;
-    count = n;
-  } else {
-    count = end - start;
-    if (count < 0) {
-      count += n;
-    }
   }
 
   const conn_info_t* c = &the_cinfo;
