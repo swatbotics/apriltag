@@ -11,6 +11,7 @@
    - replace neighbor scan in outer border with LUT
    - instead of explicitly padding in box threshold, compute what padded table lookup ought to be
    - option for fast quad fitting using only corners (no XYW fit)
+   - april-style debug visualizations
 
  */
 
