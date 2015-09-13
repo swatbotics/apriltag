@@ -7,21 +7,9 @@
 /* TODO:
 
    - blank two border rows/cols in find contours to make sure no outer borders are on edge
-   - WLS to get border lines
-   - intersect lines to get new endpoints
-
-   Possible optimizations:
-
-   1) parallelize ALL OF THE THINGS - contours, quads, etc
-   2) replace neighbor scan in outer border with LUT
-   4) instead of explicitly padding, compute what padded table lookup ought to be
-
-
-   How to fit a line to a set of weighted points in a single pass?
-
-          sum_i w_i * x_i
-   m_x = -----------------
-             sum_i w_i
+   - parallelize ALL OF THE THINGS - contours, quads, etc
+   - replace neighbor scan in outer border with LUT
+   - instead of explicitly padding in box threshold, compute what padded table lookup ought to be
 
  */
 
