@@ -354,6 +354,8 @@ zarray_t* quads_from_contours(const image_u8_t* im,
       if (area < min_area) { continue; }
 
       struct quad q;
+      q.H = q.Hinv = 0;
+      
       int idx[4];
       float l, w;
       
@@ -428,7 +430,6 @@ zarray_t* quads_from_contours(const image_u8_t* im,
         q.p[3-i][0] = p[0] + 0.5;
         q.p[3-i][1] = p[1] + 0.5;
       }
-
       
       for (int i=0; ok && i<4; ++i) {
         int j = (i+1)&3;

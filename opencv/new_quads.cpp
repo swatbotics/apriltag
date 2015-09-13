@@ -297,12 +297,15 @@ int main(int argc, char *argv[]) {
   getopt_t *getopt = getopt_create();
 
   getopt_add_bool(getopt, 'h', "help", 0, "Show this help");
-
+  getopt_add_int(getopt, 'd', "debug", "1", "Debug visual level (0-2)");
+  
   if (!getopt_parse(getopt, argc, argv, 1) || getopt_get_bool(getopt, "help")) {
     printf("Usage: %s [options] <input files>\n", argv[0]);
     getopt_do_usage(getopt);
     exit(0);
   }
+
+  int debug_vis = getopt_get_int(getopt, "debug");
 
   const zarray_t *inputs = getopt_get_extra_args(getopt);
 
@@ -352,107 +355,109 @@ int main(int argc, char *argv[]) {
 
     //////////////////////////////////////////////////////////////////////
 
-    std::cout << "my time profile:\n";
+    std::cout << "time profile for " << path << ":\n";
     timeprofile_display(tp);
+    std::cout << "\n";
+    
     timeprofile_destroy(tp);
 
-    std::vector<cv::Point> points;
+
+    if (debug_vis) {
+
+      cv::imshow("win", orig);
+      cv::waitKey();
+
+      if (debug_vis > 1) {
       
+        std::vector<cv::Point> points;
 
-    cv::Mat contour_display = orig * 0.75;
-    cv::Mat outer_display = orig * 0.75;
+        cv::Mat contour_display = orig * 0.75;
+        cv::Mat outer_display = orig * 0.75;
 
-    for (int c=0; c<zarray_size(contours); ++c) {
+        for (int c=0; c<zarray_size(contours); ++c) {
 
-      contour_info_t* ci;
-      zarray_get_volatile(contours, c, &ci);
+          contour_info_t* ci;
+          zarray_get_volatile(contours, c, &ci);
 
-      if (ci->is_outer) {
+          if (ci->is_outer) {
 
-        float ctr[2];
-        float area = contour_area_centroid(ci->points, ctr);
+            float ctr[2];
+            float area = contour_area_centroid(ci->points, ctr);
 
-        if (fabs(area) >= 64) {
+            if (fabs(area) >= 64) {
 
-          cv::Scalar color = random_color();
+              cv::Scalar color = random_color();
 
-          polylines(contour_display, ci->points, color);
+              polylines(contour_display, ci->points, color);
 
-          zarray_t* bpoints = contour_outer_boundary(ci, 0, zarray_size(ci->points));
+              zarray_t* bpoints = contour_outer_boundary(ci, 0, zarray_size(ci->points));
 
-          polylines(outer_display, bpoints, color);
+              polylines(outer_display, bpoints, color);
 
 
-          char buf[1024];
-          snprintf(buf, 1024, "%.1f", area);
+              char buf[1024];
+              snprintf(buf, 1024, "%.1f", area);
 
-          int bl;
+              int bl;
 
-          cv::Size s = getTextSize(buf, cv::FONT_HERSHEY_SIMPLEX, 0.4, 1, &bl);
+              cv::Size s = getTextSize(buf, cv::FONT_HERSHEY_SIMPLEX, 0.4, 1, &bl);
 
-          ctr[0] -= s.width/2;
-          ctr[1] += s.height/2;
+              ctr[0] -= s.width/2;
+              ctr[1] += s.height/2;
 
-          cv::putText(contour_display, buf, cv::Point(ctr[0], ctr[1]),
-                      cv::FONT_HERSHEY_SIMPLEX, 0.4, CV_RGB(0,0,0), 3, CV_AA);
+              cv::putText(contour_display, buf, cv::Point(ctr[0], ctr[1]),
+                          cv::FONT_HERSHEY_SIMPLEX, 0.4, CV_RGB(0,0,0), 3, CV_AA);
 
-          cv::putText(contour_display, buf, cv::Point(ctr[0], ctr[1]),
-                      cv::FONT_HERSHEY_SIMPLEX, 0.4, color, 1, CV_AA);
+              cv::putText(contour_display, buf, cv::Point(ctr[0], ctr[1]),
+                          cv::FONT_HERSHEY_SIMPLEX, 0.4, color, 1, CV_AA);
 
+            }
+
+          }
+
+        }
+
+        cv::imshow("win", im2cv(t8));
+        cv::waitKey();
+        
+        cv::imshow("win", contour_display);
+        cv::waitKey();
+        
+        cv::imshow("win", outer_display);
+        cv::waitKey();
+
+      }
+
+      cv::Mat arrow_display = orig * 0.75;
+
+      for (int i=0; i<zarray_size(quads); ++i) {
+
+        struct quad* qi;
+        zarray_get_volatile(quads, i, &qi);
+
+        fprintf(stderr, "p = {");
+        for (int i=0; i<4; ++i) {
+          fprintf(stderr, "%s(%.1f, %.1f)", i ? ", " : " ", qi->p[i][0], qi->p[i][1]);
+        }
+        fprintf(stderr, " }\n\n");
+
+        cv::Point2f pts[4];
+        for (int j=0; j<4; ++j) {
+          pts[j] = cv::Point2f(qi->p[j][0], qi->p[j][1]);
+        }
+
+        cv::Scalar color = random_color();
+
+        for (int j=0; j<4; ++j) {
+          arrow(arrow_display, pts[j], pts[(j+1)&3], color);
         }
 
       }
 
-    }
-
-    cv::Mat arrow_display = orig * 0.75;
-
-    for (int i=0; i<zarray_size(quads); ++i) {
-
-      struct quad* qi;
-      zarray_get_volatile(quads, i, &qi);
-
-      fprintf(stderr, "p = {");
-      for (int i=0; i<4; ++i) {
-        fprintf(stderr, "%s(%.1f, %.1f)", i ? ", " : " ", qi->p[i][0], qi->p[i][1]);
-      }
-      fprintf(stderr, " }\n\n");
-
-      cv::Point2f pts[4];
-      for (int j=0; j<4; ++j) {
-        pts[j] = cv::Point2f(qi->p[j][0], qi->p[j][1]);
-      }
-
-      cv::Scalar color = random_color();
-
-      for (int j=0; j<4; ++j) {
-        arrow(arrow_display, pts[j], pts[(j+1)&3], color);
-      }
+      cv::imshow("win", arrow_display);
+      cv::waitKey();
 
     }
-
-
-    // filtering: ratio of orig area to hull area should be > 0.8 ?
-    // hull area should be greater than # of pixels
-    // orig perimiter shouldn't be too big or too small
-
-
-    cv::imshow("win", orig);
-    cv::waitKey();
-
-    /*
-    cv::imshow("win", im2cv(t8));
-    cv::waitKey();
-
-    cv::imshow("win", contour_display);
-    cv::waitKey();
-    
-    cv::imshow("win", outer_display);
-    cv::waitKey();
-    */
-
-    cv::imshow("win", arrow_display);
-    cv::waitKey();
 
     zarray_destroy(quads);
     contour_destroy(contours);
@@ -461,6 +466,8 @@ int main(int argc, char *argv[]) {
     image_u8_destroy(im);
 
   }
+
+  getopt_destroy(getopt);
 
   return 0;
 
