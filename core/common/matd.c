@@ -33,10 +33,10 @@ either expressed or implied, of the FreeBSD Project.
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
-#include <assert.h>
 #include <math.h>
 #include <float.h>
 
+#include "assert_with_unused.h"
 #include "svd22.h"
 #include "matd.h"
 
@@ -879,6 +879,8 @@ double matd_vec_dist_n(const matd_t *a, const matd_t *b, int n)
 
     int lena = a->nrows*a->ncols;
     int lenb = b->nrows*b->ncols;
+    UNUSED(lena);
+    UNUSED(lenb);
 
     assert(n <= lena && n <= lenb);
 
@@ -914,7 +916,9 @@ double matd_vec_dot_product(const matd_t *a, const matd_t *b)
     assert(matd_is_vector(a) && matd_is_vector(b));
     int adim = a->ncols*a->nrows;
     int bdim = b->ncols*b->nrows;
+    UNUSED(bdim);
     assert(adim == bdim);
+    
 
     double acc = 0;
     for (int i = 0; i < adim; i++) {
