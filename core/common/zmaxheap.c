@@ -33,7 +33,7 @@ either expressed or implied, of the FreeBSD Project.
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
-#include <assert.h>
+#include "assert_with_unused.h"
 #include <stdint.h>
 
 #include "zmaxheap.h"
@@ -392,6 +392,8 @@ void zmaxheap_test()
             int32_t outv;
             float outfv;
             int res = zmaxheap_remove_max(heap, &outv, &outfv);
+            UNUSED(res);
+            
             if (sz == 0) {
                 assert(res == 0);
             } else {

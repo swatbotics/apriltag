@@ -29,7 +29,7 @@ of the authors and should not be interpreted as representing official policies,
 either expressed or implied, of the FreeBSD Project.
  */
 
-#include <assert.h>
+
 #include <ctype.h>
 #include <errno.h>
 #include <string.h>
@@ -37,6 +37,7 @@ either expressed or implied, of the FreeBSD Project.
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "assert_with_unused.h"
 #include "string_util.h"
 #include "zarray.h"
 
@@ -515,6 +516,7 @@ void string_feeder_require(string_feeder_t *sf, const char *str)
 
     for (int i = 0; i < len; i++) {
         char c = string_feeder_next(sf);
+        UNUSED(c);
         assert(c == str[i]);
     }
 }

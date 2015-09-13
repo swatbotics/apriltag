@@ -33,10 +33,10 @@ either expressed or implied, of the FreeBSD Project.
 // because we use a fixed-point 16 bit integer representation with one
 // fractional bit.
 #include <math.h>
-#include <assert.h>
 #include <string.h>
 #include <stdio.h>
 
+#include "assert_with_unused.h"
 #include "apriltag.h"
 #include "zarray.h"
 #include "zhash.h"
@@ -763,6 +763,7 @@ int fit_quad(apriltag_detector_t *td, image_u8_t *im, zarray_t *cluster, struct 
         double dy = p->y - cy;
 
         p->theta = atan2f(dy, dx);
+        UNUSED(terrible_atan2);
 //        p->theta = terrible_atan2(dy, dx);
     }
 
@@ -1036,6 +1037,9 @@ int fit_quad(apriltag_detector_t *td, image_u8_t *im, zarray_t *cluster, struct 
 
                 double x = lines[(i+1)&3][0] - L1*A10;
                 double y = lines[(i+1)&3][1] - L1*A11;
+                
+                UNUSED(x); UNUSED(y);
+                
                 assert(fabs(x - quad->p[i][0]) < 0.001 &&
                        fabs(y - quad->p[i][1]) < 0.001);
             }
