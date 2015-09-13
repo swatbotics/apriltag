@@ -309,8 +309,8 @@ int main(int argc, char *argv[]) {
 
   const zarray_t *inputs = getopt_get_extra_args(getopt);
 
-  struct apriltag_quad_contour_params qcp;
-  apriltag_quad_contour_defaults(&qcp);
+  apriltag_detector_t* td = apriltag_detector_create();
+  apriltag_detector_enable_quad_contours(td, 1);
 
   for (int input=0; input<zarray_size(inputs); ++input) {
 
@@ -328,38 +328,17 @@ int main(int argc, char *argv[]) {
     }
 
     image_u8_t* im = cv2im8_copy(gray);
-    image_u8_t* t8 = image_u8_create(im->width, im->height);
+
+    timeprofile_clear(td->tp);
+    timeprofile_stamp(td->tp, "init");
+
+    zarray_t* quads = apriltag_quad_contour(td, im);
     
-    //////////////////////////////////////////////////////////////////////
-
-    timeprofile_t* tp = timeprofile_create();
-
-    //////////////////////////////////////////////////////////////////////
-
-    box_threshold(im, t8, 255, 1,
-                  qcp.threshold_neighborhood_size,
-                  qcp.threshold_value);
-    
-    timeprofile_stamp(tp, "threshold");
-
-    //////////////////////////////////////////////////////////////////////
-
-    zarray_t* contours = contour_detect(t8);
-    timeprofile_stamp(tp, "contour");
-
-    //////////////////////////////////////////////////////////////////////
-    // also parallelizable
-
-    zarray_t* quads = quads_from_contours(im, contours, &qcp);
-    timeprofile_stamp(tp, "quads from contours");
-
     //////////////////////////////////////////////////////////////////////
 
     std::cout << "time profile for " << path << ":\n";
-    timeprofile_display(tp);
+    timeprofile_display(td->tp);
     std::cout << "\n";
-    
-    timeprofile_destroy(tp);
 
 
     if (debug_vis) {
@@ -367,6 +346,7 @@ int main(int argc, char *argv[]) {
       cv::imshow("win", orig);
       cv::waitKey();
 
+      /*
       if (debug_vis > 1) {
       
         std::vector<cv::Point> points;
@@ -427,6 +407,7 @@ int main(int argc, char *argv[]) {
         cv::waitKey();
 
       }
+      */
 
       cv::Mat arrow_display = orig * 0.75;
 
@@ -460,13 +441,11 @@ int main(int argc, char *argv[]) {
     }
 
     zarray_destroy(quads);
-    contour_destroy(contours);
-
-    image_u8_destroy(t8);
     image_u8_destroy(im);
 
   }
 
+  apriltag_detector_destroy(td);
   getopt_destroy(getopt);
 
   return 0;

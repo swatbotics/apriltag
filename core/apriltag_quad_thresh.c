@@ -1440,6 +1440,14 @@ image_u8_t *threshold_bayer(apriltag_detector_t *td, image_u8_t *im)
 
 zarray_t *apriltag_quad_thresh(apriltag_detector_t *td, image_u8_t *im)
 {
+
+
+    if (td->quad_contours) {
+        fprintf(stderr, "quad_contours is set in tag detector!\n");
+        assert(!td->quad_contours);
+        exit(1);
+    }
+  
     ////////////////////////////////////////////////////////
     // step 1. threshold the image, creating the edge image.
 

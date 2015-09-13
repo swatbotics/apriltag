@@ -2,6 +2,7 @@
 #include <float.h>
 #include "apriltag_quad_contour.h"
 #include "contour.h"
+#include "box.h"
 
 /* TODO:
 
@@ -137,11 +138,11 @@ float furthest_along(const zarray_t* points,
 
 }
 
-void fit_quad(const zarray_t* points,
-              const float ctr[2],
-              struct quad* q,
-              int idx[4],
-              float*l, float* w) {
+void quad_from_points(const zarray_t* points,
+                      const float ctr[2],
+                      struct quad* q,
+                      int idx[4],
+                      float*l, float* w) {
 
   float* p0 = q->p[0];
   float* p1 = q->p[1];
@@ -359,7 +360,7 @@ zarray_t* quads_from_contours(const image_u8_t* im,
       int idx[4];
       float l, w;
       
-      fit_quad(ci->points, ctr, &q, idx, &l, &w);
+      quad_from_points(ci->points, ctr, &q, idx, &l, &w);
       
       // diagonal aspect ratio check
       if (w < qcp->min_aspect*l) { continue; }
@@ -452,3 +453,34 @@ zarray_t* quads_from_contours(const image_u8_t* im,
   return quads;
 
 }
+
+zarray_t* apriltag_quad_contour(apriltag_detector_t* td,
+                                image_u8_t* im) {
+
+  if (!td->quad_contours) {
+    fprintf(stderr, "quad_contours is not set in tag detector!\n");
+    assert(td->quad_contours);
+    exit(1);
+  }
+
+  image_u8_t* thresh = image_u8_create(im->width, im->height);
+
+  box_threshold(im, thresh, 255, 1,
+                td->qcp.threshold_neighborhood_size,
+                td->qcp.threshold_value);
+
+  timeprofile_stamp(td->tp, "threshold");
+
+  zarray_t* contours = contour_detect(thresh);
+  timeprofile_stamp(td->tp, "contour");
+
+  zarray_t* quads = quads_from_contours(im, contours, &td->qcp);
+  timeprofile_stamp(td->tp, "quads from contours");
+
+  contour_destroy(contours);
+  image_u8_destroy(thresh);
+
+  return quads;
+  
+}
+

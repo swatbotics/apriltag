@@ -201,7 +201,12 @@ struct apriltag_detector
     // detection process. (Somewhat slow).
     int debug;
 
-    struct apriltag_quad_thresh_params qtp;
+    int quad_contours;
+
+    union { 
+      struct apriltag_quad_thresh_params qtp;
+      struct apriltag_quad_contour_params qcp;
+    };
 
     ///////////////////////////////////////////////////////////////
     // Statistics relating to last processed frame
@@ -273,6 +278,11 @@ struct apriltag_detection
 
 // don't forget to add a family!
 apriltag_detector_t *apriltag_detector_create();
+
+// use quad_contours or quad_thresh (default)?
+// will reset quad params to defaults for specified algorithm
+void apriltag_detector_enable_quad_contours(apriltag_detector_t* td,
+                                            int enable);
 
 // add a family to the apriltag detector. caller still "owns" the family.
 // a single instance should only be provided to one apriltag detector instance.

@@ -51,6 +51,7 @@ int main(int argc, char *argv[])
 
     getopt_add_bool(getopt, 'h', "help", 0, "Show this help");
     getopt_add_bool(getopt, 'd', "debug", 0, "Enable debugging output (slow)");
+    getopt_add_bool(getopt, 'c', "contours", 0, "Use new contour-based quad detection");
     getopt_add_bool(getopt, 'q', "quiet", 0, "Reduce output");
     getopt_add_string(getopt, 'f', "family", "tag36h11", "Tag family to use");
     getopt_add_int(getopt, '\0', "border", "1", "Set tag family border size");
@@ -91,6 +92,11 @@ int main(int argc, char *argv[])
 
     apriltag_detector_t *td = apriltag_detector_create();
     apriltag_detector_add_family(td, tf);
+
+    if (getopt_get_bool(getopt, "contours")) {
+      apriltag_detector_enable_quad_contours(td, 1);
+    }
+    
     td->quad_decimate = getopt_get_double(getopt, "decimate");
     td->quad_sigma = getopt_get_double(getopt, "blur");
     td->nthreads = getopt_get_int(getopt, "threads");
@@ -104,7 +110,6 @@ int main(int argc, char *argv[])
     int nogui = getopt_get_bool(getopt, "no-gui");
 
     const int hamm_hist_max = 10;
-
 
     for (int input = 0; input < zarray_size(inputs); input++) {
 
@@ -151,11 +156,13 @@ int main(int argc, char *argv[])
           cv::Mat dimg = detectionImage(det, orig.size(), orig.type());
           display = cv::max(display, dimg);
 
+          /*
           fprintf(stderr, "p = {");
           for (int i=0; i<4; ++i) {
             fprintf(stderr, "%s(%.1f, %.1f)", i ? ", " : " ", det->p[i][0], det->p[i][1]);
           }
           fprintf(stderr, " }\n\n");
+          */
 
         }
 

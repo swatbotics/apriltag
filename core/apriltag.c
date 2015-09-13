@@ -30,6 +30,7 @@ either expressed or implied, of the FreeBSD Project.
  */
 
 #include "apriltag.h"
+#include "apriltag_quad_contour.h"
 
 #include <math.h>
 #include <assert.h>
@@ -311,19 +312,40 @@ void apriltag_detector_clear_families(apriltag_detector_t *td)
     zarray_clear(td->tag_families);
 }
 
+void apriltag_quad_thresh_defaults(struct apriltag_quad_thresh_params* qtp) {
+
+  qtp->max_nmaxima = 10;
+  qtp->min_cluster_pixels = 5;
+  
+  qtp->max_line_fit_mse = 1.0;
+  qtp->critical_rad = 10 * M_PI / 180;
+  qtp->deglitch = 0;
+  qtp->min_white_black_diff = 15;
+
+}
+
+void apriltag_detector_enable_quad_contours(apriltag_detector_t* td,
+                                            int enable) {
+
+  td->quad_contours = enable;
+
+  if (enable) {
+    apriltag_quad_contour_defaults(&td->qcp);
+  } else {
+    apriltag_quad_thresh_defaults(&td->qtp);
+  }
+  
+}
+
 apriltag_detector_t *apriltag_detector_create()
 {
     apriltag_detector_t *td = (apriltag_detector_t*) calloc(1, sizeof(apriltag_detector_t));
 
     td->nthreads = 1;
 
-    td->qtp.max_nmaxima = 10;
-    td->qtp.min_cluster_pixels = 5;
 
-    td->qtp.max_line_fit_mse = 1.0;
-    td->qtp.critical_rad = 10 * M_PI / 180;
-    td->qtp.deglitch = 0;
-    td->qtp.min_white_black_diff = 15;
+    td->quad_contours = 0;
+    apriltag_quad_thresh_defaults(&td->qtp);
 
     td->tag_families = zarray_create(sizeof(apriltag_family_t*));
 
@@ -1067,8 +1089,14 @@ zarray_t *apriltag_detector_detect(apriltag_detector_t *td, image_u8_t *im_orig)
     if (td->debug)
         image_u8_write_pnm(quad_im, "debug_preprocess.pnm");
 
-//    zarray_t *quads = apriltag_quad_gradient(td, im_orig);
-    zarray_t *quads = apriltag_quad_thresh(td, quad_im);
+    zarray_t* quads = 0;
+
+    if (td->quad_contours) {
+      quads = apriltag_quad_contour(td, quad_im);
+    } else {
+      quads = apriltag_quad_thresh(td, quad_im);
+      //quads = apriltag_quad_gradient(td, im_orig);
+    }
 
     // adjust centers of pixels so that they correspond to the
     // original full-resolution image.
