@@ -34,6 +34,10 @@ either expressed or implied, of the FreeBSD Project.
 
 #include "zarray.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // This library tries to avoid needless proliferation of types.
 //
 // A point is a double[2]. (Note that when passing a double[2] as an
@@ -112,5 +116,10 @@ int g2d_polygon_contains_polygon(const zarray_t *polya, const zarray_t *polyb);
 
 // Is there some point which is in both polya and polyb?
 int g2d_polygon_overlaps_polygon(const zarray_t *polya, const zarray_t *polyb);
+
+#ifdef __cplusplus
+}
+#endif
+
 
 #endif
