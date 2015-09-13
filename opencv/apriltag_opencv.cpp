@@ -1,6 +1,7 @@
 #include "apriltag_opencv.h"
 
 #include <opencv2/imgproc/imgproc.hpp>
+#include <iostream>
 
 Mat8uc1 makeImage(const apriltag_detection_t* det) {
 
@@ -106,6 +107,111 @@ cv::Mat detectionImage(const apriltag_detection_t* detection,
   return dst;
 
 }
+
+
+cv::Scalar color_from_hue(double h) {
+  
+  cv::Scalar rval;
+
+  for (int i=0; i<3; ++i) {
+    double ci = fmod(h + 2.0*i, 6.0);
+    if (ci < 0.0 || ci > 6.0) {
+      std::cerr << "ci = " << ci << "\n";
+      exit(1);
+    }
+    ci = std::min(ci, 4.0-ci);
+    ci = std::max(0.0, std::min(ci, 1.0));
+    rval[i] = ci*255;
+  }
+
+  return rval;
+
+}
+
+cv::Scalar random_color() {
+
+  double h = cv::theRNG().uniform(0.0, 1.0) * 6.0;
+  return color_from_hue(h);
+
+}
+
+cv::Point scale_point(int x, int y, int u) {
+  int b = u/2;
+  return cv::Point(x*u + b, y*u + b);
+}
+
+cv::Point scale_point(const cv::Point2f p, int u, int shift) {
+  int b = u/2;
+  u *= (1 << shift);
+  return cv::Point(p.x*u + b + 0.5, p.y*u + b + 0.5);
+}
+
+void contour_to_points(const zarray_t* cpoints,
+                       std::vector<cv::Point>& points,
+                       int upscale) {
+
+  points.clear();
+
+  for (int i=0; i<zarray_size(cpoints); ++i) {
+    const contour_point_t* p;
+    zarray_get_volatile(cpoints, i, &p);
+    points.push_back(scale_point(p->x, p->y, upscale));
+  }
+
+}
+
+void arrow(cv::Mat image,
+           const cv::Point2f& p0,
+           const cv::Point2f& p1,
+           const cv::Scalar& color,
+           int u) {
+
+  cv::Point2f d10 = p1-p0;
+  d10 /= sqrt(d10.x*d10.x + d10.y*d10.y);
+
+  cv::Point2f n(d10.y, -d10.x);
+
+  int shift = 4;
+  
+  cv::Point a = scale_point(p0, u, shift);
+  cv::Point b = scale_point(p1, u, shift);
+  cv::Point c = scale_point(p1 - 4*d10 - 2*n, u, shift);
+  cv::Point d = scale_point(p1 - 4*d10 + 2*n, u, shift);
+
+  cv::line(image, a, b, color, 1, CV_AA, shift);
+  cv::line(image, b, c, color, 1, CV_AA, shift);
+  cv::line(image, b, d, color, 1, CV_AA, shift);
+  
+  
+  
+}
+
+void polylines(cv::Mat image,
+               const zarray_t* cpoints,
+               const cv::Scalar& color,
+               bool closed,
+               int u) {
+
+  std::vector<cv::Point> points;
+  
+  contour_to_points(cpoints, points, u);
+  
+  //contour_to_points(ci->points, points);
+  const cv::Point* p0 = &(points[0]);
+  int npts = points.size();
+    
+  cv::polylines(image, &p0, &npts, 1, closed, color, 1);
+
+  if (u>1) {
+    for (size_t i=0; i<points.size(); ++i) {
+      cv::circle(image, points[i], u/4+1, color, -1);
+    }
+  }
+
+  
+}
+
+
 
 /*
 void homographyToPoseCV(at::real fx, at::real fy,

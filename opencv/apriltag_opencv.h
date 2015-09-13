@@ -2,6 +2,7 @@
 #define _APRILTAG_OPENCV_H_
 
 #include "apriltag.h"
+#include "contour.h"
 
 #include <opencv2/core/core.hpp>
 
@@ -96,6 +97,29 @@ inline image_u32_t cv2im32(cv::Mat m) {
 
 }
 
+cv::Scalar color_from_hue(double h);
+
+cv::Scalar random_color();
+
+cv::Point scale_point(int x, int y, int u);
+
+cv::Point scale_point(const cv::Point2f p, int u, int shift);
+
+void contour_to_points(const zarray_t* cpoints,
+                       std::vector<cv::Point>& points,
+                       int upscale=1);
+
+void arrow(cv::Mat image,
+           const cv::Point2f& p0,
+           const cv::Point2f& p1,
+           const cv::Scalar& color,
+           int u=1);
+
+void polylines(cv::Mat image,
+               const zarray_t* cpoints,
+               const cv::Scalar& color,
+               bool closed=true,
+               int u=1);
 
 Mat8uc1 makeImage(const apriltag_detection_t* det);
 
