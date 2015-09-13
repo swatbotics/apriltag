@@ -402,7 +402,6 @@ int main(int argc, char *argv[]) {
     */
 
     cv::Mat arrow_display = orig * 0.75;
-    
 
     for (int i=0; i<zarray_size(quads); ++i) {
 
@@ -414,7 +413,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "%s(%.1f, %.1f)", i ? ", " : " ", qi->p[i][0], qi->p[i][1]);
       }
       fprintf(stderr, " }\n\n");
-
 
       cv::Point2f pts[4];
       for (int j=0; j<4; ++j) {
