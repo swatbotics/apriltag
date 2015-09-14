@@ -98,8 +98,6 @@ static const conn_info_t the_cinfo = {
   {  1,  1,  0, -1, -1, -1,  0,  1 },
 };
 
-
-
 static inline int conn_lookup(const conn_info_t* c,
                               int isrc, int jsrc,
                               int idst, int jdst) {
