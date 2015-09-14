@@ -8,6 +8,8 @@ if(THREADS_HAVE_PTHREAD_ARG)
 endif()
 
 add_compile_options("-Wall")
+add_compile_options("-g")
+
 
 set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR})
 set(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/lib)

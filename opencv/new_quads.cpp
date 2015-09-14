@@ -214,6 +214,7 @@ void test_outer() {
 
 }
 
+/*
 void test_xyw_fit() {
 
   cv::RNG& rng = cv::theRNG();
@@ -276,6 +277,7 @@ void test_xyw_fit() {
 
   
 }
+*/
 
 int main(int argc, char *argv[]) {
 

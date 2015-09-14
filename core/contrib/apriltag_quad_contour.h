@@ -19,22 +19,6 @@ typedef struct xyw_moments {
   double mXY;
 } xyw_moments_t;
 
-inline void xyw_accum(xyw_moments_t* m,
-                      double x, double y, double w) {
-
-  //printf("%f %f %f\n", x, y, w);
-  
-  m->n += w;
-
-  m->mX += x*w;
-  m->mY += y*w;
-  
-  m->mXX += x*x*w;
-  m->mYY += y*y*w;
-  m->mXY += x*y*w;
-  
-}
-
 void line_init_from_xyw(const xyw_moments_t* m, g2d_line_t* line);
 
 void apriltag_quad_contour_defaults(struct apriltag_quad_contour_params* qcp);

@@ -4,13 +4,6 @@
 #include "contour.h"
 #include "box.h"
 
-typedef union pixel_32 {
-  struct {
-    uint8_t r, g, b, a;
-  };
-  uint8_t  rgba_vec[4];
-  uint32_t rgba;
-} pixel_32_t;
 
 /* TODO:
 
@@ -23,9 +16,11 @@ typedef union pixel_32 {
 
  */
 
+#define MAKE_RGB(r, g, b) ((r)|((g)<<8)|((b)<<16))
+
 uint32_t color_from_hue(double h) {
 
-  pixel_32_t pixel;
+  uint32_t rgb[3];
 
   h -= floor(h);
   h *= 6.0;
@@ -34,10 +29,10 @@ uint32_t color_from_hue(double h) {
     double ci = fmod(h + 2.0*i, 6.0);
     ci = fmin(ci, 4.0-ci);
     ci = fmax(0.0, fmin(ci, 1.0));
-    pixel.rgba_vec[i] = ci*255;
+    rgb[i] = ci*255;
   }
 
-  return pixel.rgba;
+  return MAKE_RGB(rgb[0], rgb[1], rgb[2]);
 
 }
   
@@ -265,6 +260,23 @@ float get_max_quad_dist(const zarray_t* points,
   
 }
 
+void xyw_accum(xyw_moments_t* m,
+               double x, double y, double w) {
+
+  //printf("%f %f %f\n", x, y, w);
+  
+  m->n += w;
+
+  m->mX += x*w;
+  m->mY += y*w;
+  
+  m->mXX += x*x*w;
+  m->mYY += y*y*w;
+  m->mXY += x*y*w;
+  
+}
+
+
 double sample_gradient_xyw(const image_u8_t* im, 
                            const zarray_t* points,
                            int start,
@@ -484,7 +496,7 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
         int start = idx[i];
         int count = (idx[j]-idx[i]+n)%n;
         
-        assert( count >= 8 );
+        assert( count >= 6 );
         start = (start + 2) % n;
         count -= 4;
 
@@ -540,7 +552,6 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
 
   do_debug_vis:
 
-#define MAKE_RGB(r, g, b) ((r)|((g)<<8)|((b)<<16))
     if (td->debug) {
       uint32_t colors[7] = {
         MAKE_RGB(255,   0, 255), // success = mid purple
