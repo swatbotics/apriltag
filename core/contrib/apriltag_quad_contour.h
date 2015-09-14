@@ -10,21 +10,8 @@
 extern "C" {
 #endif
 
-typedef struct xyw_moments {
-  double n;
-  double mX;
-  double mY;
-  double mXX;
-  double mYY;
-  double mXY;
-} xyw_moments_t;
-
-void line_init_from_xyw(const xyw_moments_t* m, g2d_line_t* line);
-
 void apriltag_quad_contour_defaults(struct apriltag_quad_contour_params* qcp);
-
-zarray_t* apriltag_quad_contour(apriltag_detector_t* td,
-                                image_u8_t* im);
+zarray_t* apriltag_quad_contour(apriltag_detector_t* td, image_u8_t* im);
 
 #ifdef __cplusplus
 }

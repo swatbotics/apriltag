@@ -35,7 +35,15 @@ uint32_t color_from_hue(double h) {
   return MAKE_RGB(rgb[0], rgb[1], rgb[2]);
 
 }
-  
+
+typedef struct xyw_moments {
+  double n;
+  double mX;
+  double mY;
+  double mXX;
+  double mYY;
+  double mXY;
+} xyw_moments_t;
 
 
 void line_init_from_xyw(const xyw_moments_t* m,
