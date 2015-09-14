@@ -112,6 +112,9 @@ cv::Mat detectionImage(const apriltag_detection_t* detection,
 cv::Scalar color_from_hue(double h) {
   
   cv::Scalar rval;
+  
+  h -= floor(h);
+  h *= 6.0;
 
   for (int i=0; i<3; ++i) {
     double ci = fmod(h + 2.0*i, 6.0);
@@ -130,7 +133,7 @@ cv::Scalar color_from_hue(double h) {
 
 cv::Scalar random_color() {
 
-  double h = cv::theRNG().uniform(0.0, 1.0) * 6.0;
+  double h = cv::theRNG().uniform(0.0, 1.0);
   return color_from_hue(h);
 
 }
