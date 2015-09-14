@@ -529,6 +529,7 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
 
   if (td->debug) {
     image_u32_write_pnm(debug_vis, "debug_quad_contour.pnm");
+    image_u32_destroy(debug_vis);
   }
 
   return quads;
