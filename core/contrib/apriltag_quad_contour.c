@@ -169,7 +169,6 @@ void quad_from_points(const zarray_t* points,
   float* p2 = q->p[2];
   float* p3 = q->p[3];
 
-
   furthest_point(points, ctr, p0, idx+0);
   float l2 = furthest_point(points, p0, p2, idx+2);
   
