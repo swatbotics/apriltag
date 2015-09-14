@@ -448,47 +448,76 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
       printf("\n");
     */
 
+
     int ok = 1;
 
     g2d_line_t lines[4];
+    
+    if (0) { 
 
-    for (int i=0; ok && i<4; ++i) {
+      // quick and dirty: just dilate everything by half a pixel.
+      // what could go wrong?
+      for (int i=0; i<4; ++i) {
+
+        double dx = sides[i][0];
+        double dy = sides[i][1];
+
+        double d = sqrt(dx*dx + dy*dy);
+
+        double nx = -dy / d;
+        double ny =  dx / d;
+
+        lines[i].p[0] = q.p[i][0] + 0.5 * nx;
+        lines[i].p[1] = q.p[i][1] + 0.5 * ny;
+
+        lines[i].u[0] = dx;
+        lines[i].u[1] = dy;
         
-      int j = (i+1)%4;
-      int start = idx[i];
-      int count = (idx[j]-idx[i]+n)%n;
-        
-      assert( count >= 8 );
-      start = (start + 2) % n;
-      count -= 4;
-
-      xyw_moments_t moments;
-      memset(&moments, 0, sizeof(moments));
-
-      zarray_t* outer = contour_outer_boundary(ci, start, count);
-
-      double mean_outer, mean_inner;
-      mean_inner = sample_gradient_xyw(im, ci->points, start, count, &moments);
-      mean_outer = sample_gradient_xyw(im, outer, 0, zarray_size(outer), &moments);
-
-      zarray_destroy(outer);
-
-      if ((mean_outer - mean_inner) < td->qcp.contour_margin) {
-        ok = 0;
-      } else {
-        line_init_from_xyw(&moments, lines+i);
       }
+    
+    } else {
+
+      // do line fit along border and outer border.
+      for (int i=0; ok && i<4; ++i) {
         
-    }
+        int j = (i+1)%4;
+        int start = idx[i];
+        int count = (idx[j]-idx[i]+n)%n;
+        
+        assert( count >= 8 );
+        start = (start + 2) % n;
+        count -= 4;
 
-    if (!ok) {
-      FAIL(5);
-    }
+        xyw_moments_t moments;
+        memset(&moments, 0, sizeof(moments));
 
+        zarray_t* outer = contour_outer_boundary(ci, start, count);
+
+        double mean_outer, mean_inner;
+        mean_inner = sample_gradient_xyw(im, ci->points, start, count, &moments);
+        mean_outer = sample_gradient_xyw(im, outer, 0, zarray_size(outer), &moments);
+
+        zarray_destroy(outer);
+
+        if ((mean_outer - mean_inner) < td->qcp.contour_margin) {
+          ok = 0;
+        } else {
+          line_init_from_xyw(&moments, lines+i);
+        }
+        
+      }
+
+      if (!ok) {
+        FAIL(5);
+      }
+
+    }
+    
     for (int i=0; i<4; ++i) {
-      int j = (i+1)&3; // note reverse order!
+      int j = (i+1)&3; 
       double p[2];
       g2d_line_intersect_line(lines+i, lines+j, p);
+      // note we are putting quads into order backwards here
       q.p[3-i][0] = p[0] + 0.5;
       q.p[3-i][1] = p[1] + 0.5;
     }
