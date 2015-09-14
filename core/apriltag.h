@@ -143,6 +143,12 @@ struct apriltag_quad_contour_params
   // we need the outer (light) edge to be at least this much brighter
   // than the inner (dark) edge. 
   double contour_margin;
+
+  // how many pixels to skip near corners (scale with diam)
+  float corner_skip_scl;
+
+  // how many pixels to skip near corners (affine offset)
+  float corner_skip_bias;
   
 };
 

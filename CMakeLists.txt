@@ -9,7 +9,7 @@ endif()
 
 add_compile_options("-Wall")
 add_compile_options("-g")
-
+add_compile_options("-march=native")
 
 set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR})
 set(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/lib)

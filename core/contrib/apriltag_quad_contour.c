@@ -7,16 +7,24 @@
 
 /* TODO:
 
-   - blank two border rows/cols in find contours to make sure no outer borders are on edge
-   - parallelize ALL OF THE THINGS - contours, quads, etc
-   - replace neighbor scan in outer border with LUT
-   - instead of explicitly padding in box threshold, compute what padded table lookup ought to be
-   - option for fast quad fitting using only corners (no XYW fit)
+   - blank two border rows/cols in find contours to make sure no outer
+     borders are on edge then we can take out if statement in
+     sample_gradient_xyw
+   - parallelize ALL OF THE THINGS - threshold, picking quads, etc.
+   - instead of explicitly padding in box threshold, compute what
+     padded table lookup ought to be 
+
+  DONE: 
    - april-style debug visualizations
+   - option for fast quad fitting using only corners - tried, it
+     sucked and shaved off an immeasurable amount
+
+  NOPE:
+   - replace neighbor scan in outer border with LUT - no because we dont spend any time doing that
 
  */
 
-#define MAKE_RGB(r, g, b) ((r)|((g)<<8)|((b)<<16))
+#define MAKE_RGB(r, g, b) ( ((b)<<16) | ((g)<<8) | ((r)<<0) )
 
 uint32_t color_from_hue(double h) {
 
@@ -340,16 +348,19 @@ static inline float turn(const float p[2],
 
 void apriltag_quad_contour_defaults(struct apriltag_quad_contour_params* qcp) {
 
-  // 15 5 487
-  // 23 1 490
-  // 31 3 491
-  qcp->threshold_neighborhood_size = 31;
-  qcp->threshold_value = 3;
+  // 11 5 498
+  // 15 5 501
+  // 23 3 500
+  // 31 1 499
+  qcp->threshold_neighborhood_size = 15;
+  qcp->threshold_value = 5;
   qcp->min_side_length = 8;
   qcp->min_aspect = 0.1;
   qcp->point_dist_diam_scl = 0.1;
   qcp->point_dist_bias = 2.0;
   qcp->contour_margin = 5.0;
+  qcp->corner_skip_scl = 0.0625;
+  qcp->corner_skip_bias = 0.5;
   
 }
 
@@ -500,11 +511,15 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
         
         int j = (i+1)%4;
         int start = idx[i];
-        int count = (idx[j]-idx[i]+n)%n;
+        int count = (idx[j]-idx[i]+n+1)%n;
         
-        assert( count >= 6 );
-        start = (start + 2) % n;
-        count -= 4;
+        assert( count >= 8 );
+
+        int corner_skip = count * td->qcp.corner_skip_scl + td->qcp.corner_skip_bias;
+        corner_skip = corner_skip > count/4 ? count/4 : corner_skip;
+        
+        start = (start + corner_skip) % n;
+        count -= 2*corner_skip;
 
         xyw_moments_t moments;
         memset(&moments, 0, sizeof(moments));
@@ -552,14 +567,19 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
 
     if (!ok) {
       FAIL(6);
-    } else {
-      zarray_add(quads, &q);
     }
+
+    get_quad_sides(&q, sides, &lmin, &lmax);
+    if (lmin < td->qcp.min_aspect*lmax || lmin < td->qcp.min_side_length) {
+      FAIL(7);
+    }
+
+    zarray_add(quads, &q);
 
   do_debug_vis:
 
     if (td->debug) {
-      uint32_t colors[7] = {
+      uint32_t colors[8] = {
         MAKE_RGB(255,   0, 255), // success = mid purple
         MAKE_RGB(127,   0,   0), // area = dark red
         MAKE_RGB(127,  63,   0), // diag. aspect = dark orange
@@ -567,8 +587,9 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
         MAKE_RGB(  0, 127,   0), // too messy = dark green
         MAKE_RGB(  0, 127, 127), // not enough edge contrast = dark cyan
         MAKE_RGB(  0,   0, 127), // not CCW = dark blue
+        MAKE_RGB(  0, 191,   0), // side 2 = mid green
       };
-      draw_contour(debug_vis, ci->points, colors[fail_reason%6]);
+      draw_contour(debug_vis, ci->points, colors[fail_reason%8]);
     }
 
   }
