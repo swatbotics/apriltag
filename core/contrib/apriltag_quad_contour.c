@@ -81,7 +81,6 @@ void line_init_from_xyw(const xyw_moments_t* m,
 
   } else {
 
-    // get (0,0) as eigenvector :(
     double d = c*c - 2*a*c + 4*b*b + a*a;
   
     double v2x = sqrt(d)-c+a;
