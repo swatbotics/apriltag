@@ -181,8 +181,8 @@ void quad_from_points(const zarray_t* points,
   
   *l = sqrt(l2);
 
-  float v[2] = { p0[1] - p2[1], 
-                 p2[0] - p0[0] };
+  float v[2] = { p2[1] - p0[1], 
+                 p0[0] - p2[0] };
 
   v[0] /= *l;
   v[1] /= *l;
@@ -493,8 +493,8 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
 
         double d = sqrt(dx*dx + dy*dy);
 
-        double nx = -dy / d;
-        double ny =  dx / d;
+        double nx =  dy / d;
+        double ny = -dx / d;
 
         lines[i].p[0] = q.p[i][0] + 0.5 * nx;
         lines[i].p[1] = q.p[i][1] + 0.5 * ny;
@@ -509,7 +509,7 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
       // do line fit along border and outer border.
       for (int i=0; ok && i<4; ++i) {
         
-        int j = (i+1)%4;
+        int j = (i+3)%4;
         int start = idx[i];
         int count = (idx[j]-idx[i]+n+1)%n;
         
@@ -550,9 +550,8 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
       int j = (i+1)&3; 
       double p[2];
       g2d_line_intersect_line(lines+i, lines+j, p);
-      // note we are putting quads into order backwards here
-      q.p[3-i][0] = p[0] + 0.5;
-      q.p[3-i][1] = p[1] + 0.5;
+      q.p[i][0] = p[0] + 0.5;
+      q.p[i][1] = p[1] + 0.5;
     }
       
     for (int i=0; ok && i<4; ++i) {
