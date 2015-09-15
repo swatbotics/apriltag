@@ -401,6 +401,77 @@ image_u32_t* im8_to_im32_dim(const image_u8_t* im,
 
 }
 
+inline int lines_from_corners_fast(const struct quad* q,
+                                   const float sides[4][2],
+                                   g2d_line_t lines[4]) {
+
+  for (int i=0; i<4; ++i) {
+    
+    double dx = sides[i][0];
+    double dy = sides[i][1];
+    
+    double d = sqrt(dx*dx + dy*dy);
+
+    lines[i].u[0] = dx / d;
+    lines[i].u[1] = dy / d;
+
+    lines[i].p[0] = q->p[i][0] + 0.5f * lines[i].u[1];
+    lines[i].p[1] = q->p[i][1] - 0.5f * lines[i].u[0];
+
+  }
+
+  return 1;
+
+}
+
+inline int lines_from_corners_contour(const apriltag_detector_t* td,
+                                      const image_u8_t* im,
+                                      const contour_info_t* ci,
+                                      const struct quad* q,
+                                      const int idx[4],
+                                      g2d_line_t lines[4]) {
+
+  int n = zarray_size(ci->points);
+
+  // do line fit along border and outer border.
+  for (int i=0; i<4; ++i) {
+        
+    int j = (i+3)&3;
+    int start = idx[i];
+    int count = (idx[j]-idx[i]+n+1)%n;
+        
+    assert( count >= 8 );
+
+    int corner_skip = count * td->qcp.corner_skip_scl + td->qcp.corner_skip_bias;
+    corner_skip = corner_skip > count/4 ? count/4 : corner_skip;
+        
+    start = (start + corner_skip) % n;
+    count -= 2*corner_skip;
+
+    xyw_moments_t moments;
+    memset(&moments, 0, sizeof(moments));
+
+    zarray_t* outer = contour_outer_boundary(ci, start, count);
+
+    double mean_outer, mean_inner;
+    mean_inner = sample_gradient_xyw(im, ci->points, start, count, &moments);
+    mean_outer = sample_gradient_xyw(im, outer, 0, zarray_size(outer), &moments);
+
+    zarray_destroy(outer);
+
+    if ((mean_outer - mean_inner) < td->qcp.contour_margin) {
+      return 0;
+    } else {
+      line_init_from_xyw(&moments, lines+i);
+    }
+        
+  }
+
+  return 1;
+
+}
+
+
 zarray_t* quads_from_contours(const apriltag_detector_t* td,
                               const image_u8_t* im,
                               const zarray_t* contours) {
@@ -478,72 +549,14 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
     */
 
 
-    int ok = 1;
-
+    int ok = 0;
     g2d_line_t lines[4];
     
-    if (0) { 
+    //ok = lines_from_corners_fast(&q, sides, lines);
+    ok = lines_from_corners_contour(td, im, ci, &q, idx, lines);
 
-      // quick and dirty: just dilate everything by half a pixel.
-      // what could go wrong?
-      for (int i=0; i<4; ++i) {
-
-        double dx = sides[i][0];
-        double dy = sides[i][1];
-
-        double d = sqrt(dx*dx + dy*dy);
-
-        double nx =  dy / d;
-        double ny = -dx / d;
-
-        lines[i].p[0] = q.p[i][0] + 0.5 * nx;
-        lines[i].p[1] = q.p[i][1] + 0.5 * ny;
-
-        lines[i].u[0] = dx;
-        lines[i].u[1] = dy;
-        
-      }
-    
-    } else {
-
-      // do line fit along border and outer border.
-      for (int i=0; ok && i<4; ++i) {
-        
-        int j = (i+3)%4;
-        int start = idx[i];
-        int count = (idx[j]-idx[i]+n+1)%n;
-        
-        assert( count >= 8 );
-
-        int corner_skip = count * td->qcp.corner_skip_scl + td->qcp.corner_skip_bias;
-        corner_skip = corner_skip > count/4 ? count/4 : corner_skip;
-        
-        start = (start + corner_skip) % n;
-        count -= 2*corner_skip;
-
-        xyw_moments_t moments;
-        memset(&moments, 0, sizeof(moments));
-
-        zarray_t* outer = contour_outer_boundary(ci, start, count);
-
-        double mean_outer, mean_inner;
-        mean_inner = sample_gradient_xyw(im, ci->points, start, count, &moments);
-        mean_outer = sample_gradient_xyw(im, outer, 0, zarray_size(outer), &moments);
-
-        zarray_destroy(outer);
-
-        if ((mean_outer - mean_inner) < td->qcp.contour_margin) {
-          ok = 0;
-        } else {
-          line_init_from_xyw(&moments, lines+i);
-        }
-        
-      }
-
-      if (!ok) {
-        FAIL(5);
-      }
-
+    if (!ok) {
+      FAIL(5);
     }
     
     for (int i=0; i<4; ++i) {
