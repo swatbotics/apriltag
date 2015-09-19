@@ -1843,11 +1843,38 @@ int main(int argc, char *argv[])
 // used in NGV.
 matd_chol_t *matd_chol(matd_t *A)
 {
+
+  
+    matd_chol_t *chol = calloc(1, sizeof(matd_chol_t));
+
+    matd_chol_inplace(A, chol);
+
+    return chol;
+    
+}
+
+void matd_chol_inplace(matd_t* A, matd_chol_t* chol) {
+    
+
+  
     assert(A->nrows == A->ncols);
     int N = A->nrows;
 
+    if (chol->u) {
+      if (chol->u->nrows == N && chol->u->ncols == N) {
+        memcpy(chol->u->data, A->data, sizeof(double)*N*N);
+      } else {
+        matd_destroy(chol->u);
+        chol->u = 0;
+      }
+    }
+
+    if (!chol->u) {
+      chol->u = matd_copy(A);
+    } 
+
     // make upper right
-    matd_t *U = matd_copy(A);
+    matd_t *U = chol->u;
 
     // don't actually need to clear lower-left... we won't touch it.
 /*    for (int i = 0; i < U->nrows; i++) {
@@ -1882,10 +1909,8 @@ MATD_EL(U, i, j) = 0;
         }
     }
 
-    matd_chol_t *chol = calloc(1, sizeof(matd_chol_t));
     chol->is_spd = is_spd;
-    chol->u = U;
-    return chol;
+
 }
 
 void matd_chol_destroy(matd_chol_t *chol)
@@ -1941,10 +1966,25 @@ void matd_utriangle_solve(matd_t *u, const TYPE *b, TYPE *x)
 
 matd_t *matd_chol_solve(const matd_chol_t *chol, const matd_t *b)
 {
+
+    matd_t *x = matd_create(b->nrows, b->ncols);
+
+    matd_chol_solve_inplace(chol, b, x);
+
+    return x;
+
+}
+
+void matd_chol_solve_inplace(const matd_chol_t* chol,
+                             const matd_t* b,
+                             matd_t* x) {
+
+    assert(x->nrows == b->nrows && x->ncols == b->ncols);
+
+    memcpy(x->data, b->data, sizeof(double)*b->nrows*b->ncols);
+
     matd_t *u = chol->u;
-
-    matd_t *x = matd_copy(b);
-
+    
     // LUx = b
 
     // solve Ly = b ==> (U')y = b
@@ -1977,7 +2017,6 @@ matd_t *matd_chol_solve(const matd_chol_t *chol, const matd_t *b)
         }
     }
 
-    return x;
 }
 
 /*void matd_chol_solve(matd_chol_t *chol, const TYPE *b, TYPE *x)

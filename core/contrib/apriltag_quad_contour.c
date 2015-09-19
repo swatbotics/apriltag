@@ -1,8 +1,11 @@
 #include <math.h>
 #include <float.h>
+#include <stdint.h>
+#include <limits.h>
 #include "apriltag_quad_contour.h"
 #include "contour.h"
 #include "box.h"
+#include "lm.h"
 
 
 /* TODO:
@@ -43,6 +46,10 @@ uint32_t color_from_hue(double h) {
   return MAKE_RGB(rgb[0], rgb[1], rgb[2]);
 
 }
+
+typedef struct xyw {
+  float x, y, w;
+} xyw_t;
 
 typedef struct xyw_moments {
   double n;
@@ -401,9 +408,9 @@ image_u32_t* im8_to_im32_dim(const image_u8_t* im,
 
 }
 
-inline int lines_from_corners_fast(const struct quad* q,
-                                   const float sides[4][2],
-                                   g2d_line_t lines[4]) {
+static inline int lines_from_corners_fast(const struct quad* q,
+                                          const float sides[4][2],
+                                          g2d_line_t lines[4]) {
 
   for (int i=0; i<4; ++i) {
     
@@ -424,12 +431,300 @@ inline int lines_from_corners_fast(const struct quad* q,
 
 }
 
-inline int lines_from_corners_contour(const apriltag_detector_t* td,
-                                      const image_u8_t* im,
-                                      const contour_info_t* ci,
-                                      const struct quad* q,
-                                      const int idx[4],
-                                      g2d_line_t lines[4]) {
+/*
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+
+
+static inline void bbox(int n, const float* p, 
+                        int *x0, int* x1, int *y0, int* y1) {
+
+  *x0 = INT_MAX;
+  *y0 = INT_MAX;
+  *x1 = 0;
+  *y1 = 0;
+
+  for (int i=0; i<n; ++i) {
+    
+    float xi = p[0];
+    float yi = p[1];
+    p += 2;
+
+    int fxi = floorf(xi), cxi = ceilf(xi);
+    int fyi = floorf(yi), cyi = ceilf(yi);
+
+    *x0 = MIN(*x0, fxi);
+    *x1 = MAX(*x1, cxi);
+
+    *y0 = MIN(*y0, fyi);
+    *y1 = MAX(*y1, cyi);
+    
+  }
+
+  
+}
+
+
+static void tanh_residual(int m, int n,
+                          const double* p,
+                          double* x,
+                          double* J,
+                          void* userdata) {
+
+  assert(m == 5);
+
+  const double nx = p[0];
+  const double ny = p[1];
+  const double  d = p[2];
+  const double  r = p[3];
+  const double  o = p[4];
+  
+  const double* xyi = (const double*)userdata;
+
+  for (int i=0; i<n; ++i) {
+    double u = nx*xyi[0] + ny*xyi[1] + d;
+    double t = tanh(u);
+    double dt_du = 1-t*t;
+    x[i] = r*t + o - xyi[2];
+    if (J) {
+      J[0] = r*dt_du*xyi[0];
+      J[1] = r*dt_du*xyi[1];
+      J[2] = r*dt_du;
+      J[3] = t;
+      J[4] = 1;
+      J += 5;
+    }
+    xyi += 3;
+  }
+
+}
+
+
+static inline int lines_refine(const image_u8_t* im,
+                               struct quad* q,
+                               g2d_line_t lines[4]) {
+
+
+  int x0, y0, x1, y1;
+  bbox(4, q->p[0], &x0, &x1, &y0, &y1);
+
+  int m = 2;
+
+  x0 -= m;
+  y0 -= m;
+
+  x1 += m+1;
+  y1 += m+1;
+
+  x0 = MAX(0, x0);
+  x1 = MIN(im->width, x1);
+
+  y0 = MAX(0, y0);
+  y1 = MIN(im->height, y1);
+  
+  double llen[4] = { 0, 0, 0, 0 };
+  int pcount[4] = { 0, 0, 0, 0 };
+  zarray_t* lpts[4] = { 0, 0, 0, 0 };
+
+  //////////////////////////////////////////////////////////////////////
+  // redo lines
+
+  // line i goes from point (i-1) to point (i)
+  for (int i=0; i<4; ++i) {
+    
+    int j = (i+3) & 3;
+    
+    double gx = q->p[i][0] - q->p[j][0];
+    double gy = q->p[i][1] - q->p[j][1];
+    
+    double l = sqrt(gx*gx + gy*gy);
+
+    g2d_line_t* li = lines + i;
+
+    li->p[0] = q->p[j][0];
+    li->p[1] = q->p[j][1];
+
+    li->u[0] = gx/l;
+    li->u[1] = gy/l;
+
+    llen[i] = l;
+    
+    lpts[i] = zarray_create(sizeof(double)*3);
+
+  }
+
+  uint8_t* srcrow = im->buf + y0*im->stride + x0;
+
+  for (int y=y0; y<y1; ++y) {
+
+    uint8_t* src = srcrow;
+    double fy = y+0.5;
+
+    for (int x=x0; x<x1; ++x) {
+
+      uint8_t sxy = *src++;
+      double fx = x+0.5;
+
+      for (int i=0; i<4; ++i) {
+
+        const g2d_line_t* li = lines + i;
+
+        double ux = li->u[0];
+        double uy = li->u[1];
+
+        double nx = uy;
+        double ny = -ux;
+
+        double dx = fx - li->p[0];
+        double dy = fy - li->p[1];
+
+        // get distance along
+        double lx = ux*dx + uy*dy;
+        double ly = nx*dx - ny*dy;
+
+        double xyi[3] = { fx, fy, sxy/255.0 };
+
+        const double dlx = 1.5;
+        const double dly = 2.0;
+
+        if (ly >= -dly && ly <= dly && lx >= dlx && lx <= llen[i] - dlx) {
+          ++pcount[i];
+          zarray_add(lpts[i], xyi);
+        }
+        
+      }
+ 
+    }
+    
+    srcrow += im->stride;
+  }
+
+  int ok = 1;
+  int redo = 0;
+
+  for (int i=0; i<4; ++i) {
+
+    zarray_t* lpi = lpts[i];
+
+    if (!zarray_size(lpi)) {
+      ok = 0;
+    }
+
+    if (ok) {
+
+      g2d_line_t* li = lines + i;
+      
+      double ux = li->u[0];
+      double uy = li->u[1];
+      
+      double nx = uy;
+      double ny = -ux;
+      double d = -(nx * li->p[0] + ny*li->p[1]);
+
+      double imin = DBL_MAX, imax = -DBL_MAX;
+
+      for (int j=0; j<zarray_size(lpi); ++j) {
+        const double* xyi;
+        zarray_get_volatile(lpi, j, &xyi);
+        imin = MIN(imin, xyi[2]);
+        imax = MAX(imax, xyi[2]);
+      }
+
+      double r = 0.5*(imax-imin);
+      double o = 0.5*(imax+imin);
+      double scl = 16.0;
+      
+      double params[5] = { scl*nx, scl*ny, scl*d, r, o };
+
+      //lm_check_residual(5, MIN(10, zarray_size(lpi)), params,
+      //tanh_residual, lpi->data);
+
+      lm_opts_t opts;
+
+      lm_opts_defaults(&opts);
+      opts.lfunc = LM_LOSS_HUBER;
+      opts.lparam = 0.1;
+      
+      lm_info_t info;
+
+      //printf("\n");
+
+      //printf("initial params: %10.4f %10.4f %10.4f %10.4f %10.4f\n",
+      //params[0], params[1], params[2], params[3], params[4]);
+
+      int lm_result = lm_der(5, zarray_size(lpi), params, tanh_residual,
+                             100, &opts, &info, lpi->data);
+
+      //printf("final params:   %10.4f %10.4f %10.4f %10.4f %10.4f\n",
+      //params[0], params[1], params[2], params[3], params[4]);
+
+      //printf("initial loss: %f\n", info.initial_loss);
+      //printf("final loss:   %f\n", info.final_loss);
+      //printf("iterations:   %d\n", info.num_iterations);
+      //printf("termination:  %s\n", lm_result_to_string(info.stop_reason));
+
+      if (lm_result == 0) {
+
+        nx = params[0];
+        ny = params[1];
+        d = params[2];
+
+        double nmag = sqrt(nx*nx + ny*ny);
+
+        nx /= nmag;
+        ny /= nmag;
+        d /= nmag;
+
+        redo = 1;
+
+        li->u[0] = ny;
+        li->u[1] = -nx;
+        li->p[0] = -d*nx;
+        li->p[1] = -d*ny;
+
+      }
+      
+    }
+    
+    zarray_destroy(lpi);
+    
+  }
+
+  if (ok && redo) {
+
+    for (int i=0; i<4; ++i) {
+      int j = (i+1)&3; 
+      double p[2];
+      g2d_line_intersect_line(lines+i, lines+j, p);
+      q->p[i][0] = p[0];
+      q->p[i][1] = p[1];
+    }
+      
+    for (int i=0; ok && i<4; ++i) {
+      int j = (i+1)&3;
+      int k = (i+2)&3;
+      float tval = turn(q->p[i], q->p[j], q->p[k]);
+      if (tval < 0) {
+        ok = 0;
+        break;
+      }
+    }
+
+  }
+
+  
+  return ok;
+
+}
+
+*/
+
+static inline int lines_from_corners_contour(const apriltag_detector_t* td,
+                                             const image_u8_t* im,
+                                             const contour_info_t* ci,
+                                             const struct quad* q,
+                                             const int idx[4],
+                                             g2d_line_t lines[4]) {
 
   int n = zarray_size(ci->points);
 
@@ -470,6 +765,7 @@ inline int lines_from_corners_contour(const apriltag_detector_t* td,
   return 1;
 
 }
+
 
 
 zarray_t* quads_from_contours(const apriltag_detector_t* td,
@@ -548,23 +844,30 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
       printf("\n");
     */
 
-
     int ok = 0;
     g2d_line_t lines[4];
-    
-    //ok = lines_from_corners_fast(&q, sides, lines);
-    ok = lines_from_corners_contour(td, im, ci, &q, idx, lines);
+
+    if (0) {
+      ok = lines_from_corners_fast(&q, sides, lines);
+    } else {
+      ok = lines_from_corners_contour(td, im, ci, &q, idx, lines);
+    }
 
     if (!ok) {
       FAIL(5);
+    }
+
+    for (int i=0; i<4; ++i) {
+      lines[i].p[0] += 0.5;
+      lines[i].p[1] += 0.5;
     }
     
     for (int i=0; i<4; ++i) {
       int j = (i+1)&3; 
       double p[2];
       g2d_line_intersect_line(lines+i, lines+j, p);
-      q.p[i][0] = p[0] + 0.5;
-      q.p[i][1] = p[1] + 0.5;
+      q.p[i][0] = p[0];
+      q.p[i][1] = p[1];
     }
       
     for (int i=0; ok && i<4; ++i) {
@@ -581,11 +884,20 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
       FAIL(6);
     }
 
+
     get_quad_sides(&q, sides, &lmin, &lmax);
     if (lmin < td->qcp.min_aspect*lmax || lmin < td->qcp.min_side_length) {
       FAIL(7);
     }
 
+    // refine?
+    if (0) {
+      ok = lines_refine(im, &q, lines);
+      if (!ok) {
+        FAIL(7);
+      }
+    }
+    
     zarray_add(quads, &q);
 
   do_debug_vis:

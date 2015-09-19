@@ -434,7 +434,15 @@ typedef struct
 } matd_chol_t;
 
 matd_chol_t *matd_chol(matd_t *A);
+
+void matd_chol_inplace(matd_t *A, matd_chol_t* chol);
+
 matd_t *matd_chol_solve(const matd_chol_t *chol, const matd_t *b);
+
+void matd_chol_solve_inplace(const matd_chol_t *chol,
+                             const matd_t *b,
+                             matd_t* x);
+
 void matd_chol_destroy(matd_chol_t *chol);
 // only sensible on PSD matrices
 matd_t *matd_chol_inverse(matd_t *a);
