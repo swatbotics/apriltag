@@ -355,10 +355,6 @@ static inline float turn(const float p[2],
 
 void apriltag_quad_contour_defaults(struct apriltag_quad_contour_params* qcp) {
 
-  // 11 5 498
-  // 15 5 501
-  // 23 3 500
-  // 31 1 499
   qcp->threshold_neighborhood_size = 15;
   qcp->threshold_value = 5;
   qcp->min_side_length = 8;
@@ -516,21 +512,24 @@ static inline int lines_refine(const image_u8_t* im,
   x1 += m+1;
   y1 += m+1;
 
-  x0 = MAX(0, x0);
-  x1 = MIN(im->width, x1);
+  x0 = MAX(1, x0);
+  x1 = MIN(im->width-1, x1);
 
-  y0 = MAX(0, y0);
-  y1 = MIN(im->height, y1);
+  y0 = MAX(1, y0);
+  y1 = MIN(im->height-1, y1);
   
   double llen[4] = { 0, 0, 0, 0 };
   int pcount[4] = { 0, 0, 0, 0 };
   zarray_t* lpts[4] = { 0, 0, 0, 0 };
+  xyw_moments_t mo[4];
 
   //////////////////////////////////////////////////////////////////////
   // redo lines
 
   // line i goes from point (i-1) to point (i)
   for (int i=0; i<4; ++i) {
+
+    memset(mo+i, 0, sizeof(xyw_moments_t));
     
     int j = (i+3) & 3;
     
@@ -555,6 +554,11 @@ static inline int lines_refine(const image_u8_t* im,
 
   uint8_t* srcrow = im->buf + y0*im->stride + x0;
 
+  int up = -im->stride;
+  int dn =  im->stride;
+  int lt = -1;
+  int rt = 1;
+
   for (int y=y0; y<y1; ++y) {
 
     uint8_t* src = srcrow;
@@ -562,7 +566,14 @@ static inline int lines_refine(const image_u8_t* im,
 
     for (int x=x0; x<x1; ++x) {
 
-      uint8_t sxy = *src++;
+      uint8_t sxy = *src;
+
+      double gx = src[rt] - src[lt];
+      double gy = src[dn] - src[up];
+      double gmag = sqrt(gx*gx + gy*gy);
+
+      ++src;
+      
       double fx = x+0.5;
 
       for (int i=0; i<4; ++i) {
@@ -582,14 +593,14 @@ static inline int lines_refine(const image_u8_t* im,
         double lx = ux*dx + uy*dy;
         double ly = nx*dx - ny*dy;
 
-        double xyi[3] = { fx, fy, sxy/255.0 };
-
         const double dlx = 1.5;
-        const double dly = 2.0;
+        const double dly = 2.5;
 
         if (ly >= -dly && ly <= dly && lx >= dlx && lx <= llen[i] - dlx) {
           ++pcount[i];
+          double xyi[3] = { fx, fy, sxy/255.0 };
           zarray_add(lpts[i], xyi);
+          xyw_accum(mo+i, fx, fy, gmag);
         }
         
       }
@@ -606,7 +617,7 @@ static inline int lines_refine(const image_u8_t* im,
 
     zarray_t* lpi = lpts[i];
 
-    if (!zarray_size(lpi)) {
+    if (!pcount[i]) {
       ok = 0;
     }
 
@@ -890,15 +901,9 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
       FAIL(7);
     }
 
-    // refine?
-    if (0) {
-      ok = lines_refine(im, &q, lines);
-      if (!ok) {
-        FAIL(7);
-      }
-    }
-    
     zarray_add(quads, &q);
+    
+    
 
   do_debug_vis:
 
