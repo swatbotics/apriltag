@@ -6,13 +6,12 @@
 #include "contour.h"
 #include "box.h"
 #include "lm.h"
-
+#include "math_util.h"
 
 /* 
 
   TODO:
 
-   - parallelize finding contours (if possible)
    - parallelize processing contours 
 
   DONE: 
@@ -20,6 +19,7 @@
    - april-style debug visualizations
    - parallelize integral images
    - parallelize box threshold
+   - parallelize finding contours (did not seem to help)
 
   NOPE:
 
@@ -592,6 +592,27 @@ static inline int quad_from_contour(const apriltag_detector_t* td,
 
 }
 
+typedef struct qfc_info {
+  const apriltag_detector_t* td;
+  const image_u8_t* im;
+  const contour_info_t* contours;
+  struct quad* quads;
+  int* results;
+  int count;
+} qfc_info_t;
+
+static void qfc_task(void* p) {
+
+  qfc_info_t* qfc = (qfc_info_t*)p;
+
+  for (int i=0; i<qfc->count; ++i) {
+    qfc->results[i] = quad_from_contour(qfc->td, qfc->im,
+                                        qfc->contours + i,
+                                        qfc->quads + i);
+  }
+  
+}
+
 zarray_t* quads_from_contours(const apriltag_detector_t* td,
                               const image_u8_t* im,
                               const zarray_t* contours) {
@@ -604,19 +625,39 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
     debug_vis = im8_to_im32_dim(im, 0.5);
   }
 
-  for (int c=0; c<zarray_size(contours); ++c) {
+  int nc = zarray_size(contours);
 
-    const contour_info_t* ci;
-    zarray_get_volatile(contours, c, &ci);
+
+  struct quad wquads[nc];
+  int results[nc];
+  const contour_info_t* ctrs = (const contour_info_t*)contours->data;
+
+  int chunksize = 1 + nc / (APRILTAG_TASKS_PER_THREAD_TARGET * td->nthreads);
+
+  qfc_info_t qfcs[nc / chunksize + 1];
+
+  int ntasks = 0;
+
+  for (int i=0; i<nc; i+=chunksize) {
+    qfcs[ntasks].td = td;
+    qfcs[ntasks].im = im;
+    qfcs[ntasks].contours = ctrs + i;
+    qfcs[ntasks].quads = wquads + i;
+    qfcs[ntasks].results = results + i;
+    qfcs[ntasks].count = imin(nc, i+chunksize) - i;
+    workerpool_add_task(td->wp, qfc_task, qfcs+ntasks);
+    ++ntasks;
+  }
+
+  workerpool_run(td->wp);
+  
+  for (int c=0; c<nc; ++c) {
     
-    struct quad q;
-    int result = quad_from_contour(td, im, ci, &q);
-
-    if (result == 0) {
-      zarray_add(quads, &q);
+    if (results[c] == 0) {
+      zarray_add(quads, wquads+c);
     }
 
-    if (td->debug && result >= 0) {
+    if (td->debug && results[c] >= 0) {
       uint32_t colors[8] = {
         MAKE_RGB(255,   0, 255), // success = mid purple
         MAKE_RGB(127,   0,   0), // area = dark red
@@ -627,7 +668,7 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
         MAKE_RGB(  0,   0, 127), // not CCW = dark blue
         MAKE_RGB(  0, 191,   0), // side 2 = mid green
       };
-      draw_contour(debug_vis, ci->points, colors[result % 8]);
+      draw_contour(debug_vis, ctrs[c].points, colors[results[c] % 8]);
     }
     
   }
