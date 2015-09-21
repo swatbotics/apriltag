@@ -10,20 +10,29 @@
 
 /* TODO:
 
-   - blank two border rows/cols in find contours to make sure no outer
-     borders are on edge then we can take out if statement in
-     sample_gradient_xyw
-   - parallelize ALL OF THE THINGS - threshold, picking quads, etc.
-   - instead of explicitly padding in box threshold, compute what
-     padded table lookup ought to be 
+   - parallelize finding contours (if possible)
+   - parallelize processing contours 
 
   DONE: 
    - april-style debug visualizations
+   - parallelize integral images
+   - parallelize box threshold
+
+  NOPE:
+
+   - replace neighbor scan in outer border with LUT - no because we
+     dont spend any time doing that
+
    - option for fast quad fitting using only corners - tried, it
      sucked and shaved off an immeasurable amount
 
-  NOPE:
-   - replace neighbor scan in outer border with LUT - no because we dont spend any time doing that
+   - instead of explicitly padding in box threshold, compute what
+     padded table lookup ought to be - nope, this was too branch-y
+
+   - blank two border rows/cols in find contours to make sure no outer
+     borders are on edge then we can take out if statement in
+     sample_gradient_xyw - didn't save any time
+
 
  */
 
@@ -321,23 +330,21 @@ double sample_gradient_xyw(const image_u8_t* im,
     const contour_point_t* p;
     zarray_get_volatile(points, i, &p);
 
-    // TODO: deal
-    if (p->x == 0 || p->x == im->width-1 ||
-        p->y == 0 || p->y == im->height-1) {
-      continue;
-    }
+    if (p->x && p->y && p->x + 1 < im->width && p->y + 1 < im->height) {
 
-    int offs = p->x + im->stride*p->y;
+      int offs = p->x + im->stride*p->y;
     
-    double gx = im->buf[offs+rt] - im->buf[offs+lt];
-    double gy = im->buf[offs+dn] - im->buf[offs+up];
+      double gx = im->buf[offs+rt] - im->buf[offs+lt];
+      double gy = im->buf[offs+dn] - im->buf[offs+up];
 
-    double w = sqrt(gx*gx + gy*gy);
+      double w = sqrt(gx*gx + gy*gy);
 
-    isum += im->buf[offs]*w;
-    wsum += w;
+      isum += im->buf[offs]*w;
+      wsum += w;
 
-    xyw_accum(moments, p->x, p->y, w);
+      xyw_accum(moments, p->x, p->y, w);
+
+    }
     
   }
 

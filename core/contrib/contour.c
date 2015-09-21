@@ -237,13 +237,16 @@ zarray_t* contour_detect(const image_u8_t* im8) {
   ccount_t* dst = im->buf+im->stride;
 
   memset(im->buf, 0, sizeof(ccount_t)*im->width);
-  memset(im->buf + (im->height-1)*im->stride, 0, sizeof(ccount_t)*im->width);
+  memset(im->buf + im->stride, 0, sizeof(ccount_t)*im->width);
+  //memset(im->buf + (im->height-2)*im->stride, 0, sizeof(ccount_t)*im->width);
+  //memset(im->buf + (im->height-1)*im->stride, 0, sizeof(ccount_t)*im->width);
 
   for (uint32_t y=1; y<im->height-1; ++y) {
     for (uint32_t x=1; x<im->width-1; ++x) {
       dst[x] = src[x] ? 1 : 0;
     }
-    dst[0] = dst[im->width-1] = 0;
+    dst[0] = dst[1] = 0;
+    // dst[im->width-2] = dst[im->width-1] = 0;
     src += im8->stride;
     dst += im->stride;
   }
