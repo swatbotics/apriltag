@@ -22,14 +22,14 @@ void test_integrate() {
     cv::Size(4, 3),
     //cv::Size(64, 48),
     //cv::Size(640, 480),
-    //cv::Size(1280, 960),
+    //cv::Size(800, 600),
+    cv::Size(1280, 960),
     //cv::Size(2560, 1920),
-    cv::Size(800, 600),
     cv::Size(0,0),
   };
 
   int lsizes[] = {
-    0, 2, 7, -1
+    0, 2, 7, 15, -1
   };
 
   workerpool_t* wp = workerpool_create(4);

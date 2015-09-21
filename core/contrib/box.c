@@ -655,14 +655,22 @@ image_u32_t* integrate_border_replicate_mt(const image_u8_t* img, int l,
       if (x1 > xend) { x1 = xend; }
       if (y1 > yend) { y1 = yend; }
 
-      cur_block->src += ( (ry * INTEGRATE_BLOCK_SIZE) * cur_block->sstride +
-                          (rx * INTEGRATE_BLOCK_SIZE) * cur_block->sstep );
+      cur_block->src +=  (ry * cur_block->sstride + 
+                          rx * cur_block->sstep) * INTEGRATE_BLOCK_SIZE;
+      
       cur_block->dst = iimg->buf + x0 + y0*iimg->stride;
 
       cur_block->nx = x1-x0;
       cur_block->ny = y1-y0;
 
-      cur_block->is_central = 0;
+      if (0) {
+        cur_block->is_central =
+          (cur_block->sstride && cur_block->sstep &&
+           cur_block->nx == INTEGRATE_BLOCK_SIZE &&
+           cur_block->ny == INTEGRATE_BLOCK_SIZE);
+      } else {
+        cur_block->is_central = 0;
+      }
 
       if (0) {
 
@@ -705,8 +713,13 @@ image_u32_t* integrate_border_replicate_mt(const image_u8_t* img, int l,
 
     cur_block = info.blocks + i;
 
-    integrate_block(cur_block->src, cur_block->sstep, cur_block->sstride,
-                    cur_block->dst, info.dstride, cur_block->nx, cur_block->ny);
+    if (cur_block->is_central) {
+      integrate_block_center(cur_block->src, cur_block->sstride,
+                             cur_block->dst, info.dstride);
+    } else {
+      integrate_block(cur_block->src, cur_block->sstep, cur_block->sstride,
+                      cur_block->dst, info.dstride, cur_block->nx, cur_block->ny);
+    }
 
     
   }
