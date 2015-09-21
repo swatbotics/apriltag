@@ -7,7 +7,45 @@
 #include <stdio.h>
 #include <pthread.h>
 
-image_u32_t* aligned_image_64bit(int width, int height) {
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
+#include <assert.h>
+
+image_u8_t* image_u8_aligned64(int width, int height) {
+
+  int stride = width;
+
+  if (stride & 0x3f) {
+    stride += 64 - (stride & 0x3f);
+  }
+
+  void* vptr = 0;
+
+  size_t size = height * stride * sizeof(uint8_t);
+  int status = posix_memalign(&vptr, 64, size);
+  
+  if (status != 0 || !vptr) {
+    return NULL;
+  }
+
+  image_u8_t tmp = {
+    .width = width,
+    .height = height,
+    .stride = stride,
+    .buf = vptr
+  };
+
+  image_u8_t* img = (image_u8_t*)malloc(sizeof(image_u8_t));
+
+  *img = tmp;
+
+  return img;
+  
+}
+
+image_u32_t* image_u32_aligned64(int width, int height) {
 
   int stride = width;
 
@@ -18,7 +56,7 @@ image_u32_t* aligned_image_64bit(int width, int height) {
   void* vptr = 0;
 
   size_t size = height * stride * sizeof(uint32_t);
-  int status = posix_memalign(&vptr, 16, size);
+  int status = posix_memalign(&vptr, 64, size);
   
   if (status != 0 || !vptr) {
     return NULL;
@@ -36,7 +74,10 @@ image_u32_t* aligned_image_64bit(int width, int height) {
 }
 
 enum {
-  INTEGRATE_BLOCK_SIZE = 16,
+  INTEGRATE_BLOCK_SIZE = 64,
+  INTEGRATE_ALLOW_CENTRAL = 0,
+  INTEGRATE_MIN_BLOCKS_PER_THREAD = 10,
+  
 };
 
 static inline void integrate_block_center(const uint8_t* src, int sstride,
@@ -81,7 +122,7 @@ image_u32_t* integrate_border_replicate(const image_u8_t* img, int l) {
 
   return integrate_border_replicate_mt(img, l, NULL);
 
-  image_u32_t* iimg = aligned_image_64bit(img->width + 2*l + 1,
+  image_u32_t* iimg = image_u32_aligned64(img->width + 2*l + 1,
                                           img->height + 2*l + 1);
 
   // zero out first line
@@ -335,16 +376,10 @@ image_u32_t* integrate(const image_u8_t* img) {
 
 */
 
-void box_filter_border_replicate(const image_u8_t* src_img, 
-                                 image_u8_t* dst_img,
-                                 int sz) {
+image_u8_t* box_filter_border_replicate(const image_u8_t* src_img, 
+                                        int sz) {
 
-  if (!(src_img->width == dst_img->width &&
-        src_img->height == dst_img->height)) {
-    fprintf(stderr, "%s:%d: image size mismatch in %s\n", 
-            __FILE__, __LINE__, __FUNCTION__);
-    exit(1);
-  }
+  image_u8_t* dst_img = image_u8_aligned64(src_img->width, src_img->height);
 
   int l = sz/2;
   sz = 2*l+1;
@@ -352,47 +387,80 @@ void box_filter_border_replicate(const image_u8_t* src_img,
   int s2 = sz*sz;
   int s22 = s2/2; // for rounding?
   
-  image_u32_t* tmp_img = integrate_border_replicate(src_img, l);
+  image_u32_t* sum_img = integrate_border_replicate(src_img, l);
 
-  uint8_t* dst = dst_img->buf;
+  uint8_t* dst_row = dst_img->buf;
 
-  const uint32_t* tmp = tmp_img->buf;
+  const uint32_t* sum_row = sum_img->buf;
 
-  int ob = tmp_img->stride*sz;
+  int ob = sum_img->stride*sz;
   int od = ob + sz;
 
-  int tmprem = tmp_img->stride - dst_img->width;
-  int dstrem = dst_img->stride - dst_img->width;
-
   for (int y=0; y<dst_img->height; ++y) {
+    uint8_t* dst = dst_row;
+    const uint32_t* sum = sum_row;
     for (int x=0; x<dst_img->width; ++x) {
-      int t = (tmp[od] - tmp[ob] - tmp[sz] + *tmp + s22)/s2;
-      *dst++ = t;
-      ++tmp;
+      *dst++ = (sum[od] - sum[ob] - sum[sz] + sum[0] + s22)/s2;
+      ++sum;
     }
-    dst += dstrem;
-    tmp += tmprem;
+    dst_row += dst_img->stride;
+    sum_row += sum_img->stride;
   }
 
-  image_u32_destroy(tmp_img);
+  image_u32_destroy(sum_img);
+
+  return dst_img;
+
+}
+
+image_u8_t* box_filter_border_replicate_mt(const image_u8_t* src_img, 
+                                           int sz, workerpool_t* wp) {
+
+  image_u8_t* dst_img = image_u8_aligned64(src_img->width, src_img->height);
+
+  int l = sz/2;
+  sz = 2*l+1;
+
+  int s2 = sz*sz;
+  int s22 = s2/2; // for rounding?
+  
+  image_u32_t* sum_img = integrate_border_replicate_mt(src_img, l, wp);
+
+  uint8_t* dst_row = dst_img->buf;
+
+  const uint32_t* sum_row = sum_img->buf;
+
+  int ob = sum_img->stride*sz;
+  int od = ob + sz;
+
+  for (int y=0; y<dst_img->height; ++y) {
+    uint8_t* dst = dst_row;
+    const uint32_t* sum = sum_row;
+    for (int x=0; x<dst_img->width; ++x) {
+      *dst++ = (sum[od] - sum[ob] - sum[sz] + sum[0] + s22)/s2;
+      ++sum;
+    }
+    dst_row += dst_img->stride;
+    sum_row += sum_img->stride;
+  }
+
+  image_u32_destroy(sum_img);
+
+  return dst_img;
 
 }
 
 
-void box_threshold(const image_u8_t* src_img, 
-                   image_u8_t* dst_img,
-                   int max_value, 
-                   int invert, 
-                   int sz, 
-                   int tau) {
+image_u8_t* box_threshold(const image_u8_t* src_img, 
+                          int max_value, 
+                          int invert, 
+                          int sz, 
+                          int tau) {
 
-  if (!(src_img->width == dst_img->width &&
-        src_img->height == dst_img->height)) {
-    fprintf(stderr, "%s:%d: image size mismatch in %s\n", 
-            __FILE__, __LINE__, __FUNCTION__);
-    exit(1);
-  }
-
+  
+  image_u8_t* dst_img = image_u8_aligned64(src_img->width,
+                                           src_img->height);
+                                           
   int gt = invert ? 0 : max_value;
   int lt = max_value - gt;
   
@@ -429,6 +497,8 @@ void box_threshold(const image_u8_t* src_img,
   }
 
   image_u32_destroy(tmp_img);
+
+  return dst_img;
 
 }
 
@@ -474,33 +544,61 @@ typedef struct integrate_info {
   
 } integrate_info_t;
 
+typedef struct integrate_task_ {
+  integrate_info_t* info;
+  int id;
+} integrate_task_t;
+
+
+#define task_debug 0
+#define debug_printf if (task_debug) printf
+#define debug_fflush if (task_debug) fflush
+
 void integrate_task(void* p) {
 
-  integrate_info_t* info = (integrate_info_t*)p;
+  integrate_task_t* task = (integrate_task_t*)p;
+
+  integrate_info_t* info = task->info;
+  int task_id = task->id;
+
+  debug_printf("starting integrate_task for task %d\n", task_id);
 
   pthread_mutex_lock(&info->mutex);
 
+  debug_printf("task %d has the lock\n", task_id);
+  
   // invariant: we hold the lock at the top of the loop here
   while (!info->finished) { 
-
+    
+    debug_printf("task %d at top of loop\n", task_id);
+    
     if (info->queue_start == info->queue_end) {
 
+      debug_printf("task %d waiting because queue empty!\n", task_id);
+      debug_fflush(stdout);
+      
       // if the queue is empty, wait for work to be placed into it (or
       // for all work to be finished)
       pthread_cond_wait(&info->cond, &info->mutex);
       // note we regain the lock after this returns
+ 
+      debug_printf("task %d woke up after signal!\n", task_id);
       
     } else {
+
 
       int idx = info->queue[info->queue_start];
       block_info_t* block = info->blocks + idx;
       assert(block->status == 1);
-      
       ++info->queue_start;
 
+      debug_printf("task %d popped off idx %d, queue size is %d. "
+              "unlocking and integrating...\n",
+              task_id, idx, info->queue_end - info->queue_start);
+      
       pthread_mutex_unlock(&info->mutex);
 
-      if (block->is_central) {
+      if (INTEGRATE_ALLOW_CENTRAL && block->is_central) {
         integrate_block_center(block->src, block->sstride,
                                block->dst, info->dstride);
       } else {
@@ -508,35 +606,56 @@ void integrate_task(void* p) {
                         block->dst, info->dstride,
                         block->nx, block->ny);
       }
-      
+
+      debug_fflush(stdout);
+
+      //sched_yield();
+
       pthread_mutex_lock(&info->mutex);
 
+      debug_printf("task %d done integrating block %d and re-locked\n",
+                   task_id, idx);
+      
       block->status = 2;
       int do_broadcast = 0;
 
       if (idx != (info->total_blocks-1)) { // not all done
 
-        // check above right 
-        if (block->bx + 1 < info->num_blocks_x && block->by > 0) {
+        if (block->bx + 1 < info->num_blocks_x) { // are blocks right ?
           int ridx = idx + 1;
-          int aridx = ridx - info->num_blocks_x;
-          if (info->blocks[aridx].status == 2 &&
-              info->blocks[ridx].status == 0) {
-            info->queue[info->queue_end++] = ridx;
-            info->blocks[ridx].status = 1;
-            do_broadcast = 1;
+          debug_printf("task %d checking to see whether should enqueue %d...\n", task_id, ridx);
+          if (info->blocks[ridx].status == 0) {
+            int aridx = ridx - info->num_blocks_x;
+            if ( !block->by || info->blocks[aridx].status == 2 ) {
+              info->queue[info->queue_end++] = ridx;
+              info->blocks[ridx].status = 1;
+              do_broadcast = 1;
+              debug_printf("task %d enqueued block %d (will broadcast)\n",
+                           task_id, ridx);
+            } else {
+              debug_printf("task %d found block %d not ready yet.\n", task_id, ridx);
+            }
+          } else {
+            debug_printf("task %d found that block %d is already enqueued/done.\n", task_id, ridx);
           }
         }
 
-        // check below left
-        if (block->by + 1 < info->num_blocks_y && block->bx > 0) {
+        if (block->by + 1 < info->num_blocks_y) { // are blocks below?
           int bidx = idx + info->num_blocks_x;
-          int blidx = bidx - 1;
-          if (info->blocks[blidx].status == 2 &&
-              info->blocks[bidx].status == 0) {
-            info->queue[info->queue_end++] = bidx;
-            info->blocks[bidx].status = 1;
-            do_broadcast = 1;
+          debug_printf("task %d checking to see whether should enqueue %d...\n", task_id, bidx);
+          if (info->blocks[bidx].status == 0) {
+            int blidx = bidx - 1;
+            if ( !block->bx || info->blocks[blidx].status == 2 ) {
+              info->queue[info->queue_end++] = bidx;
+              info->blocks[bidx].status = 1;
+              do_broadcast = 1; 
+              debug_printf("task %d enqueued block %d (will broadcast)\n",
+                           task_id, bidx);
+            } else {
+              debug_printf("task %d found block %d not ready yet.\n", task_id, bidx);
+            }
+          } else {
+            debug_printf("task %d found that block %d is already enqueued/done.\n", task_id, bidx);
           }
         }
 
@@ -544,10 +663,13 @@ void integrate_task(void* p) {
 
         do_broadcast = 1;
         info->finished = 1;
-        
+ 
+        debug_printf("task %d is the finisher! (will broadcast)\n",
+                     task_id);
+       
       }
 
-      if (do_broadcast) {
+      if (1 || do_broadcast) {
         pthread_cond_broadcast(&info->cond);
       }
       
@@ -556,13 +678,15 @@ void integrate_task(void* p) {
   }
 
   pthread_mutex_unlock(&info->mutex);
-
+  debug_printf("task %d all done!\n", task_id);
+  debug_fflush(stdout);
+  
 }
 
 image_u32_t* integrate_border_replicate_mt(const image_u8_t* img, int l,
                                            workerpool_t* wp) {
 
-  image_u32_t* iimg = aligned_image_64bit(img->width + 2*l + 1,
+  image_u32_t* iimg = image_u32_aligned64(img->width + 2*l + 1,
                                           img->height + 2*l + 1);
 
   // zero out first line
@@ -663,14 +787,13 @@ image_u32_t* integrate_border_replicate_mt(const image_u8_t* img, int l,
       cur_block->nx = x1-x0;
       cur_block->ny = y1-y0;
 
-      if (0) {
-        cur_block->is_central =
-          (cur_block->sstride && cur_block->sstep &&
-           cur_block->nx == INTEGRATE_BLOCK_SIZE &&
-           cur_block->ny == INTEGRATE_BLOCK_SIZE);
-      } else {
-        cur_block->is_central = 0;
-      }
+      cur_block->status = 0;
+
+      cur_block->is_central =
+        (INTEGRATE_ALLOW_CENTRAL &&
+         cur_block->sstride && cur_block->sstep &&
+         cur_block->nx == INTEGRATE_BLOCK_SIZE &&
+         cur_block->ny == INTEGRATE_BLOCK_SIZE);
 
       if (0) {
 
@@ -709,18 +832,57 @@ image_u32_t* integrate_border_replicate_mt(const image_u8_t* img, int l,
 
   memset(iimg->buf, 0, 4*iimg->stride*iimg->height);
 
-  for (int i=0; i<info.total_blocks; ++i) {
+  int nt = wp ? workerpool_get_nthreads(wp) : 1;
 
-    cur_block = info.blocks + i;
+  int blocks_per_thread = info.total_blocks / nt;
 
-    if (cur_block->is_central) {
-      integrate_block_center(cur_block->src, cur_block->sstride,
-                             cur_block->dst, info.dstride);
-    } else {
-      integrate_block(cur_block->src, cur_block->sstep, cur_block->sstride,
-                      cur_block->dst, info.dstride, cur_block->nx, cur_block->ny);
+  if (wp == NULL || nt <= 1 ||
+      blocks_per_thread < INTEGRATE_MIN_BLOCKS_PER_THREAD) {
+
+    for (int i=0; i<info.total_blocks; ++i) {
+
+      cur_block = info.blocks + i;
+
+      if (cur_block->bx) {
+        assert(info.blocks[i-1].status == 2);
+      }
+      if (cur_block->by) {
+        assert(info.blocks[i-info.num_blocks_x].status == 2);
+      }
+
+      if (INTEGRATE_ALLOW_CENTRAL && cur_block->is_central) {
+        integrate_block_center(cur_block->src, cur_block->sstride,
+                               cur_block->dst, info.dstride);
+      } else {
+        integrate_block(cur_block->src, cur_block->sstep, cur_block->sstride,
+                        cur_block->dst, info.dstride, cur_block->nx, cur_block->ny);
+      }
+
+      cur_block->status = 2;
+    
     }
 
+  } else {
+
+
+    //printf("adding tasks...\n");
+
+    integrate_task_t tasks[nt];
+
+    for (int i=0; i<nt; ++i) {
+      integrate_task_t* task = tasks + i;
+      task->id = i;
+      task->info = &info;
+      workerpool_add_task(wp, integrate_task, task);
+    }
+    
+    //printf("added!\n");
+    //printf("running tasks...\n");
+
+    workerpool_run(wp);
+    //workerpool_run_single(wp);
+
+    //printf("done!\n");
     
   }
 
