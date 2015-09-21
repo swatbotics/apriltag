@@ -28,6 +28,10 @@ const int box_sizes[] = {
   15, 0
 };
 
+const int thresholds[] = {
+  0, 3, 5, 256
+};
+
 const int max_iter = 100;
 
 void test_integrate() {
@@ -209,11 +213,109 @@ void test_box() {
 
 }
 
+void test_thresh() {
+
+  workerpool_t* wp = workerpool_create(4);
+
+  for (int i=0; img_sizes[i].width; ++i) {
+
+    cv::Size isz(img_sizes[i]);
+
+    for (int b=0; box_sizes[b]; ++b) {
+
+      int bsz = box_sizes[b];
+
+      for (int t=0; thresholds[t] < 256; ++t) {
+
+        int tau = thresholds[t];
+
+        for (int inv=0; inv<2; ++inv) {
+
+          Mat8uc1 orig(isz), cv_thresh;
+      
+          cv::theRNG().fill(orig, cv::RNG::UNIFORM, 0, 255);
+      
+          image_u8_t src8 = cv2im8(orig);
+
+          image_u8_t* ithresh = 0;
+          image_u8_t* ithresh_mt = 0;
+      
+          int64_t elapsed_mz = 0, elapsed_mz_mt = 0, elapsed_cv = 0;
+
+          std::cout << "box thresholding size " << isz << " with width " << bsz << " and threshold " << tau << " and invert " << inv << "\n";
+
+          for (int iter=0; iter<max_iter; ++iter) {
+            if (ithresh) { image_u8_destroy(ithresh); }
+            int64_t start = utime_now();
+            ithresh = box_threshold(&src8, 255, inv, bsz, tau);
+            elapsed_mz += utime_now() - start;
+          }
+
+          for (int iter=0; iter<max_iter; ++iter) {
+            if (ithresh_mt) { image_u8_destroy(ithresh_mt); }
+            int64_t start = utime_now();
+            ithresh_mt = box_threshold_mt(&src8, 255, inv, bsz, tau, wp);
+            elapsed_mz_mt += utime_now() - start;
+          }
+
+          for (int iter=0; iter<max_iter; ++iter) {
+            int64_t start = utime_now();
+            // void adaptiveThreshold(InputArray src, OutputArray dst, double maxValue, int adaptiveMethod, int thresholdType, int blockSize, double C)¶
+            cv::adaptiveThreshold(orig, cv_thresh, 255, cv::ADAPTIVE_THRESH_MEAN_C, inv ? cv::THRESH_BINARY_INV : cv::THRESH_BINARY, bsz, tau);
+            elapsed_cv += utime_now() - start;
+          }
+
+          cv::Mat mz_thresh = im2cv(ithresh);
+          cv::Mat mz_mt_thresh = im2cv(ithresh_mt);
+
+          cv::Mat diff;
+      
+          cv::absdiff(mz_thresh, cv_thresh, diff);
+
+          double error = cv::sum(diff)[0];
+
+          cv::absdiff(mz_mt_thresh, cv_thresh, diff);
+
+          error += cv::sum(diff)[0];
+      
+          std::cout << "average mz is " << (elapsed_mz*1e-3)/max_iter << " ms\n";
+          std::cout << "average mz (MT) is " << (elapsed_mz_mt*1e-3)/max_iter << " ms\n";
+          std::cout << "average cv is " << (elapsed_cv*1e-3)/max_iter << " ms\n";
+          std::cout << "error = " << error << "\n\n";
+
+          if (error) {
+            std::cerr << "something went wrong, quitting\n";
+            if (isz.width <= 16 && isz.height <= 16) {
+              std::cerr << cv_thresh << "\n";
+              std::cerr << mz_thresh << "\n";
+              std::cerr << mz_mt_thresh << "\n";
+            }
+            exit(1);
+          }
+
+          image_u8_destroy(ithresh_mt);
+          image_u8_destroy(ithresh);
+
+        }
+
+      }
+
+    }
+
+  }
+
+  workerpool_destroy(wp);
+
+}
+
+
 int main(int argc, char *argv[]) {
   
   test_integrate();
   
   test_box();
+
+  test_thresh();
 
   return 0;
 

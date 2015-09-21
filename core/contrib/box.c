@@ -6,12 +6,21 @@
 #include <assert.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <math.h>
 
+/*
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
+*/
 
 #include <assert.h>
+
+static inline int ceildivide(int a, int b) {
+  int x = (a+b-1)/b;
+  assert(x == (int) ceil( ((double)a) /  b ) );
+  return x;
+}
 
 image_u8_t* image_u8_aligned64(int width, int height) {
 
@@ -125,25 +134,6 @@ static inline void integrate_block(const uint8_t* src, int sstep, int sstride,
 image_u32_t* integrate_border_replicate(const image_u8_t* img, int l) {
 
   return integrate_border_replicate_mt(img, l, NULL);
-  /*
-
-  image_u32_t* iimg = image_u32_aligned64(img->width + 2*l + 1,
-                                          img->height + 2*l + 1);
-
-  // zero out first line
-  memset(iimg->buf, 0, sizeof(uint32_t)*iimg->width);
-  uint32_t* dl = iimg->buf + iimg->stride;
-  
-  // zero out first row of each line
-  for (int y=1; y<iimg->height; ++y) {
-    *dl = 0 ;
-    dl += iimg->stride;
-  }
-  
-  
-  return iimg;
-
-  */
 
 }
 
@@ -176,26 +166,6 @@ image_u8_t* box_filter_border_replicate(const image_u8_t* src_img,
                                         int sz) {
 
   return box_filter_border_replicate_mt(src_img, sz, 0);
-
-  /*
-
-  image_u8_t* dst_img = image_u8_aligned64(src_img->width, src_img->height);
-
-  int l = sz/2;
-  sz = 2*l+1;
-
-  image_u32_t* sum_img = integrate_border_replicate(src_img, l);
-
-  box_filter_rows(dst_img->buf, dst_img->stride,
-                  sum_img->buf, sum_img->stride,
-                  src_img->width, src_img->height, sz);
-
-  image_u32_destroy(sum_img);
-
-  return dst_img;
-
-  */
-
 
 }
 
@@ -240,8 +210,7 @@ image_u8_t* box_filter_border_replicate_mt(const image_u8_t* src_img,
 
   } else {
 
-    int rows_per_block = src_img->height / nt;
-    if (src_img->height % nt) { ++rows_per_block; }
+    int rows_per_block = ceildivide(src_img->height, nt);
 
     box_filter_info_t bfs[nt];
 
@@ -262,6 +231,7 @@ image_u8_t* box_filter_border_replicate_mt(const image_u8_t* src_img,
       dst_row += rows_per_block * dst_img->stride;
       sum_row += rows_per_block * sum_img->stride;
       workerpool_add_task(wp, box_filter_task, bfs+i);
+      y0 = y1;
     }
 
     workerpool_run(wp);
@@ -275,57 +245,147 @@ image_u8_t* box_filter_border_replicate_mt(const image_u8_t* src_img,
 }
 
 
+static inline void box_threshold_rows(uint8_t* dst_row, int dst_stride, 
+                                      const uint32_t* sum_row, int sum_stride,
+                                      const uint8_t* src_row, int src_stride,
+                                      int nx, int ny,
+                                      int sz, int tau,
+                                      int gt, int lt) {
+
+  int s2 = sz*sz;
+  int s22 = s2/2; // for rounding?
+  
+  int ob = sum_stride*sz;
+  int od = ob + sz;
+  
+  for (int y=0; y<ny; ++y) {
+    uint8_t* dst = dst_row;
+    const uint32_t* sum = sum_row;
+    const uint8_t* src = src_row;
+    for (int x=0; x<nx; ++x) {
+      int t = (sum[od] - sum[ob] - sum[sz] + sum[0] + s22)/s2 - tau;
+      int s = *src++;
+      *dst++ = s > t ? gt : lt;
+      ++sum;
+    }
+    dst_row += dst_stride;
+    sum_row += sum_stride;
+    src_row += src_stride;
+  }
+
+
+}
+
+
+typedef struct box_threshold_info {
+  uint8_t* dst;
+  const uint32_t* sum;
+  const uint8_t* src;
+  int dst_stride;
+  int sum_stride;
+  int src_stride;
+  int nx;
+  int ny;
+  int sz;
+  int tau;
+  int gt;
+  int lt;
+} box_threshold_info_t;
+
+void box_threshold_task(void* p) {
+
+  box_threshold_info_t* info = (box_threshold_info_t*)p;
+
+  box_threshold_rows(info->dst, info->dst_stride,
+                     info->sum, info->sum_stride,
+                     info->src, info->src_stride,
+                     info->nx, info->ny,
+                     info->sz, info->tau,
+                     info->gt, info->lt);
+  
+}
+
 image_u8_t* box_threshold(const image_u8_t* src_img, 
                           int max_value, 
                           int invert, 
                           int sz, 
                           int tau) {
-
   
+  return box_threshold_mt(src_img, max_value, invert, sz, tau, NULL);
+
+}
+
+image_u8_t* box_threshold_mt(const image_u8_t* src_img, 
+                             int max_value, 
+                             int invert, 
+                             int sz, 
+                             int tau,
+                             workerpool_t* wp) {
+
   image_u8_t* dst_img = image_u8_aligned64(src_img->width,
                                            src_img->height);
-                                           
-  int gt = invert ? 0 : max_value;
-  int lt = max_value - gt;
-  
+
   int l = sz/2;
   sz = 2*l+1;
 
-  int s2 = sz*sz;
-  int s22 = s2/2; // for rounding?
+  image_u32_t* sum_img = integrate_border_replicate_mt(src_img, l, wp);
 
-  image_u32_t* tmp_img = integrate_border_replicate(src_img, l);
+  int gt = invert ? 0 : max_value;
+  int lt = max_value - gt;
 
-  uint8_t* dst = dst_img->buf;
+  int nt = wp ? workerpool_get_nthreads(wp) : 1;
 
-  const uint32_t* tmp = tmp_img->buf;
-  const uint8_t* src = src_img->buf;
+  if (wp == NULL || nt <= 1) {
 
-  int ob = tmp_img->stride*sz;
-  int od = ob + sz;
+    box_threshold_rows(dst_img->buf, dst_img->stride,
+                       sum_img->buf, sum_img->stride,
+                       src_img->buf, src_img->stride,
+                       src_img->width, src_img->height,
+                       sz, tau, gt, lt);
 
-  int tmprem = tmp_img->stride - dst_img->width;
-  int dstrem = dst_img->stride - dst_img->width;
-  int srcrem = src_img->stride - dst_img->width;
+  } else {
 
-  for (int y=0; y<dst_img->height; ++y) {
-    for (int x=0; x<dst_img->width; ++x) {
-      int t = (tmp[od] - tmp[ob] - tmp[sz] + *tmp + s22)/s2 - tau;
-      int s = *src++;
-      *dst++ = s > t ? gt : lt;
-      ++tmp;
+    int rows_per_block = ceildivide(dst_img->height, nt);
+
+    box_threshold_info_t bts[nt];
+
+    int y0 = 0;
+    uint8_t* dst_row = dst_img->buf;
+    const uint32_t* sum_row = sum_img->buf;
+    const uint8_t* src_row = src_img->buf;
+
+    for (int i=0; i<nt; ++i) {
+      int y1 = y0 + rows_per_block;
+      if (y1 > src_img->height) { y1 = src_img->height; }
+      bts[i].dst = dst_row;
+      bts[i].sum = sum_row;
+      bts[i].src = src_row;
+      bts[i].dst_stride = dst_img->stride;
+      bts[i].sum_stride = sum_img->stride;
+      bts[i].src_stride = src_img->stride;
+      bts[i].nx = dst_img->width;
+      bts[i].ny = y1 - y0;
+      bts[i].sz = sz;
+      bts[i].tau = tau;
+      bts[i].gt = gt;
+      bts[i].lt = lt;
+      dst_row += rows_per_block * dst_img->stride;
+      sum_row += rows_per_block * sum_img->stride;
+      src_row += rows_per_block * src_img->stride;
+      workerpool_add_task(wp, box_threshold_task, bts+i);
+      y0 = y1;
     }
-    src += srcrem;
-    dst += dstrem;
-    tmp += tmprem;
-  }
 
-  image_u32_destroy(tmp_img);
+    workerpool_run(wp);
+
+  }
+                     
+
+  image_u32_destroy(sum_img);
 
   return dst_img;
 
 }
-
 
 typedef struct block_info {
 
@@ -507,6 +567,7 @@ void integrate_task(void* p) {
   
 }
 
+
 image_u32_t* integrate_border_replicate_mt(const image_u8_t* img, int l,
                                            workerpool_t* wp) {
 
@@ -523,12 +584,11 @@ image_u32_t* integrate_border_replicate_mt(const image_u8_t* img, int l,
     dl += iimg->stride;
   }
 
-
   integrate_info_t info;
 
-  int nbl = (l / INTEGRATE_BLOCK_SIZE) + (l % INTEGRATE_BLOCK_SIZE ? 1 : 0);
-  int nbx = (img->width / INTEGRATE_BLOCK_SIZE) + (img->width % INTEGRATE_BLOCK_SIZE ? 1 : 0);
-  int nby = (img->height / INTEGRATE_BLOCK_SIZE) + (img->height % INTEGRATE_BLOCK_SIZE ? 1 : 0);
+  int nbl = ceildivide(l, INTEGRATE_BLOCK_SIZE);
+  int nbx = ceildivide(img->width, INTEGRATE_BLOCK_SIZE);
+  int nby = ceildivide(img->height, INTEGRATE_BLOCK_SIZE);
 
   info.num_blocks_x = nbx + 2*nbl;
   info.num_blocks_y = nby + 2*nbl;
