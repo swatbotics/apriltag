@@ -36,6 +36,11 @@
      borders are on edge then we can take out if statement in
      sample_gradient_xyw - didn't save any time
 
+   - refine pixels via XYW fit near lines after fast fit - no
+     improvement
+
+   - refine pixels via nonlinear least squares (fit border to tanh
+     function) after fast fit - no improvement
 
  */
 
