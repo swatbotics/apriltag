@@ -942,9 +942,10 @@ zarray_t* apriltag_quad_contour(apriltag_detector_t* td,
     exit(1);
   }
 
-  image_u8_t* thresh = box_threshold(im, 255, 1,
-                                     td->qcp.threshold_neighborhood_size,
-                                     td->qcp.threshold_value);
+  image_u8_t* thresh = box_threshold_mt(im, 255, 1,
+                                        td->qcp.threshold_neighborhood_size,
+                                        td->qcp.threshold_value,
+                                        td->wp);
 
   if (td->debug) {
     image_u8_write_pnm(thresh, "debug_threshold.pnm");
