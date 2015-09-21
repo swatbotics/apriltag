@@ -3,135 +3,296 @@
 #include <alloca.h>
 #include <stdlib.h>
 #include <string.h>
-
-/*
-#ifdef NDEBUG
-#undef NDEBUG
-#endif
-*/
-
 #include <assert.h>
 #include <stdio.h>
+#include <pthread.h>
+#include "zarray.h"
 
-typedef struct cbuf {
+image_u32_t* aligned_image_64bit(int width, int height) {
 
-  int width; // allocated size of data
-  int count; // # currently occupied slots
-  int tail; // one past end of data
-  uint32_t total; // running total
-  uint8_t* data;
-  
-} cbuf_t;
+  int stride = width;
 
-void cbuf_push(cbuf_t* c, uint8_t x) {
-
-  assert(c->count < c->width);
-  c->data[c->tail] = x;
-  c->total += x;
-  ++c->count;
-  
-  if (++c->tail == c->width) {
-    c->tail = 0;
+  if (stride & 0xf) {
+    stride += 16 - (stride & 0xf);
   }
 
-  //printf("after pushing %d, count is %d and total is %d\n", (int)x, c->count, c->total);
+  void* vptr = 0;
+
+  size_t size = height * stride * sizeof(uint32_t);
+  int status = posix_memalign(&vptr, 16, size);
+  
+  if (status != 0 || !vptr) {
+    return NULL;
+  }
+
+  image_u32_t* img = (image_u32_t*)malloc(sizeof(image_u32_t));
+  
+  img->width = width;
+  img->height = height;
+  img->stride = stride;
+  img->buf = vptr;
+
+  return img;
+  
+}
+
+enum {
+  INTEGRATE_BLOCK_SIZE = 16
+};
+
+static inline void integrate_block_center(const uint8_t* src, int sstride,
+                                          uint32_t* dst, int dstride) {
+
+  for (int y=0; y<INTEGRATE_BLOCK_SIZE; ++y) {
+    const uint8_t* s = src;
+    uint32_t* d = dst;
+    for (int x=0; x<INTEGRATE_BLOCK_SIZE; ++x) {
+      d[dstride+1] = *s++ + d[dstride] + d[1] - d[0];
+      ++d;
+    }
+    src += sstride;
+    dst += dstride;
+  }
 
 }
 
-void cbuf_pop(cbuf_t* c) {
+static inline void integrate_block(const uint8_t* src, int sstep, int sstride,
+                                   uint32_t* dst, int dstride,
+                                   int nx, int ny) {
 
-  assert(c->count);
 
-  int idx = c->tail - c->count;
-  if (idx < 0) { idx += c->width; }
-
-  assert(idx >= 0 && idx < c->count );
-  c->total -= c->data[idx];
-  --c->count;
+  for (int y=0; y<ny; ++y) {
+    const uint8_t* s = src;
+    uint32_t* d = dst;
+    for (int x=0; x<nx; ++x) {
+      d[dstride+1] = *s + d[dstride] + d[1] - d[0];
+      ++d;
+      s += sstep;
+    }
+    src += sstride;
+    dst += dstride;
+  }
 
 }
+                                  
+                                  
+                                  
 
+image_u32_t* integrate_border_replicate(const image_u8_t* img, int l) {
 
-void bfrc(uint8_t* data, int count, int skip, int sz) {
+  image_u32_t* iimg = aligned_image_64bit(img->width + 2*l + 1,
+                                          img->height + 2*l + 1);
 
-  int l = sz/2;
-  sz = 2*l + 1; // ensure odd!
-
-  cbuf_t c = { sz, 0, 0, 0, 0 };
-  c.data = alloca(sz);
-
-  int k;
-
-  // left pad
-  for (k=0; k<=l; ++k) { 
-    cbuf_push(&c, *data); 
-  }
-
-  assert(c.total == *data * (l+1));
-  assert(c.count == l+1);
-
-  uint8_t* edge = data;
-  uint8_t* mid = data;
-  uint8_t* last_data = data + (count-1)*skip;
+  // zero out first line
+  memset(iimg->buf, 0, sizeof(uint32_t)*iimg->width);
+  uint32_t* dl = iimg->buf + iimg->stride;
   
-  for (k=1; k<l; ++k) { 
-    if (edge != last_data) { 
-      edge += skip;
-    }
-    cbuf_push(&c, *edge);
+  // zero out first row of each line
+  for (int y=1; y<iimg->height; ++y) {
+    *dl = 0 ;
+    dl += iimg->stride;
   }
+  
+  const uint8_t* src = img->buf;
 
-  assert(c.count == sz-1);
+  uint32_t* dst = iimg->buf;
+  int ds = iimg->stride;
+  int ss = img->stride;
 
-  for (k=0; k<count; ++k) {
+  int W = img->width, w = W-1, H = img->height, h = H-1;
+    
+  //////////////////////////////////////////////////////////////////////
+  // TOP PADDING
 
-    assert(c.count == sz-1);
+  integrate_block(src, 0, 0, dst, ds, l, l);
 
-    if (edge != last_data) { 
-      edge += skip;
-    }
-    cbuf_push(&c, *edge);
-    assert(c.count == sz);
+  dst += l;
 
-    uint32_t avg = (c.total+l)/sz;
+  integrate_block(src, 1, 0, dst, ds, W, l);
 
-    *mid = avg;
+  dst += W;
 
-    cbuf_pop(&c);
+  integrate_block(src + w, 0, 0, dst, ds, l, l);
 
-    mid += skip;
+  //////////////////////////////////////////////////////////////////////
+  // MIDDLE ROWS
 
-  }
+  dst = iimg->buf + ds*l;
 
-  assert(c.count == sz-1);
-  assert(mid == last_data + skip);
-  assert(edge == last_data);
+  integrate_block(src, 0, ss, dst, ds,l, H);
+
+  dst += l;
+
+  integrate_block(src, 1, ss, dst, ds, W, H);
+
+  dst += W;
+
+  integrate_block(src + w, 0, ss, dst, ds, l, H);
+  
+  //////////////////////////////////////////////////////////////////////
+  // BOTTOM PADDING
+
+  dst = iimg->buf + ds*(l + H);
+
+  integrate_block(src + h*ss, 0, 0, dst, ds, l, l);
+
+  dst += l;
+
+  integrate_block(src + h*ss, 1, 0, dst, ds, W, l);
+
+  dst += W;
+
+  integrate_block(src + h*ss + w, 0, 0, dst, ds, l, l);
+  
+  return iimg;
 
 
 }
 
 /*
-static inline int imin(int a, int b) { return a < b ? a : b; }
-static inline int imax(int a, int b) { return a > b ? a : b; }
+static inline
+uint32_t iimg_lookup_with_border_center(const image_u32_t* iimg,
+                                        int sz, int i, int j) {
 
-static inline int ilookup(const image_u32_t* iimg,
-                          int x, int y) {
+  assert( i >= -sz && j >= -sz && i < iimg->height+sz && j < iimg->width+sz );
 
-  x = imax(0, imin(x, iimg->width-1));
-  y = imax(0, imin(y, iimg->height-1));
+  uint32_t* b = iimg->buf;
+  int s = iimg->stride;
 
-  return iimg->buf[iimg->stride*y + x];
+  uint32_t s11 = b[iimg->stride + 1];
+  uint32_t sij = b[s*i+j];
+  uint32_t si1 = b[s*i+1];
+  uint32_t s1j = b[s + j];
+  return sij + sz*(sz*s11 + si1 + s1j);
+  
+}
+
+
+static inline
+uint32_t iimg_lookup_with_border(const image_u32_t* iimg,
+                                 int sz, int i, int j) {
+
+  assert( i >= -sz && j >= -sz && i < iimg->height+sz && j < iimg->width+sz );
+
+  int code = ( ((i < 0)<<3) | ((i >= iimg->height)<<2) |
+               ((j >= iimg->width)<<1) | (j < 0) );
+
+  uint32_t* b = iimg->buf;
+  int s = iimg->stride;
+
+  uint32_t s11 = b[iimg->stride + 1];
+
+  int H = iimg->height-1, h = H-1, W = iimg->width-1, w = W-1;
+
+  switch (code) {
+  case 0: { // middle
+    uint32_t sij = b[s*i+j];
+    uint32_t si1 = b[s*i+1];
+    uint32_t s1j = b[s + j];
+    return sij + sz*(sz*s11 + si1 + s1j);
+  }
+  case 9: { // above left
+    i += sz;
+    j += sz;
+    return s11 * i * j;
+  }
+  case 8: { // above
+    i += sz;
+    uint32_t s1j = b[s + j];
+    return (s1j + s11*sz)*i;
+  }
+  case 1: { // left
+    j += sz;
+    uint32_t si1 = b[s*i+1];
+    return (si1 + s11*sz)*j;
+  }
+  case 10: { // above right
+    uint32_t s1W = b[s + W];
+    uint32_t s1w = b[s + w];
+    j -= W;
+    i += sz;
+    return (s1W + (s1W-s1w)*j + s11*sz)*i;
+  }
+  case 5: { // below left
+    uint32_t sH1 = b[s*H+1];
+    uint32_t sh1 = b[s*h+1];
+    i -= H;
+    j += sz;
+    return (sH1 + (sH1-sh1)*i + s11*sz)*j;
+  }
+  case 2: { // right
+    uint32_t s1W = b[s + W];
+    uint32_t s1w = b[s + w];
+    uint32_t siW = b[s*i+W];
+    uint32_t siw = b[s*i+w];
+    uint32_t si1 = b[s*i+1];
+    j -= W;
+    return ( siW +
+             (s11*sz + si1 + s1W)*sz +
+             ((s1W - s1w)*sz + (siW - siw))*j );
+  }
+  case 4: { // below
+    uint32_t sH1 = b[s*H+1];
+    uint32_t sh1 = b[s*h+1];
+    uint32_t sHj = b[s*H+j];
+    uint32_t shj = b[s*h+j];
+    uint32_t s1j = b[s + j];
+    i -= H;
+    return ( sHj +
+             (s11*sz + s1j + sH1)*sz +
+             ((sH1 - sh1)*sz + (sHj - shj))*i );
+  }
+  case 6: { // below right
+
+    uint32_t s1W = b[s + W];
+    uint32_t s1w = b[s + w];
+    uint32_t sH1 = b[s*H+1];
+    uint32_t sh1 = b[s*h+1];
+    uint32_t sHW = b[s*H+W];
+    uint32_t sHw = b[s*H+w];
+    uint32_t shW = b[s*h+W];
+    uint32_t shw = b[s*h+w];
+
+    i -= H;
+    j -= W;
+
+    return ( sHW +
+             (s11*sz + sH1 + s1W)*sz +
+             ((sH1 - sh1)*sz + (sHW - shW)*(1+j) + (shw - sHw)*j)*i + 
+             ((s1W - s1w)*sz + (sHW - sHw))*j ); // 14 add, 8 multiply
+
+  }
+  default:
+    return 0;
+  }
 
 }
-*/
 
-image_u32_t* integrate(const image_u8_t* img, int l) {
+image_u32_t* integral_copy_border_replicate(const image_u32_t* iimg,
+                                            int sz) {
+
+  image_u32_t* copy = image_u32_create(iimg->width+2*sz, iimg->height+2*sz);
+
+  uint32_t* dstrow = copy->buf;
+  
+  for (int y=0; y<copy->height; ++y) {
+    for (int x=0; x<copy->width; ++x) {
+      dstrow[x] = iimg_lookup_with_border(iimg, sz, y-sz, x-sz);
+    }
+    dstrow += copy->stride;
+  }
+
+  return copy;
+
+}
+
+
+image_u32_t* integrate(const image_u8_t* img) {
 
   image_u32_t tmp;
-  tmp.width = img->width+2*l+1;
-  tmp.height = img->height+2*l+1;
+  tmp.width = img->width+1;
+  tmp.height = img->height+1;
   tmp.stride = tmp.width;
-
 
   if (tmp.stride & 0xf) {
     tmp.stride += 16 - (tmp.stride & 0xf);
@@ -152,59 +313,12 @@ image_u32_t* integrate(const image_u8_t* img, int l) {
   int o01 = -iimg->stride;
   int o11 = o10 + o01;
 
-  //////////////////////////////////////////////////////////////////////
-  // TOP PADDING
-
-  for (int y=0; y<l; ++y) {
-
-    *dst++ = 0;
-
-    const uint8_t* psrc = img->buf;
-
-    // left padding
-    for (int x=0; x<l; ++x) {
-      *(dst) = (*psrc) + dst[o10] + dst[o01] - dst[o11];
-      ++dst;
-    }
-
-    // main row
-    for (int x=0; x<img->width; ++x) {
-      *(dst) = (*psrc++) + dst[o10] + dst[o01] - dst[o11];
-      ++dst;
-    }
-
-    // right padding
-    for (int x=0; x<l; ++x) {
-      *(dst) = psrc[-1] + dst[o10] + dst[o01] - dst[o11];
-      ++dst;
-    }
-
-    dst += dstrem;
-
-  }
-
-  //////////////////////////////////////////////////////////////////////
-  // MIDDLE ROWS
-
   for (int y=0; y<img->height; ++y) {
 
     *dst++ = 0;
 
-    // left padding
-    for (int x=0; x<l; ++x) {
-      *(dst) = (*src) + dst[o10] + dst[o01] - dst[o11];
-      ++dst;
-    }
-
-    // main row
     for (int x=0; x<img->width; ++x) {
-      *(dst) = (*src++) + dst[o10] + dst[o01] - dst[o11];
-      ++dst;
-    }
-
-    // right padding
-    for (int x=0; x<l; ++x) {
-      *(dst) = src[-1] + dst[o10] + dst[o01] - dst[o11];
+      *dst = (*src++) + dst[o10] + dst[o01] - dst[o11];
       ++dst;
     }
 
@@ -213,49 +327,16 @@ image_u32_t* integrate(const image_u8_t* img, int l) {
 
   }
   
-  //////////////////////////////////////////////////////////////////////
-  // BOTTOM PADDING
-
-  const uint8_t* lastrow = img->buf + (img->height-1)*img->stride;
-
-  for (int y=0; y<l; ++y) {
-
-    *dst++ = 0;
-
-    const uint8_t* psrc = lastrow;
-
-    // left padding
-    for (int x=0; x<l; ++x) {
-      *(dst) = (*psrc) + dst[o10] + dst[o01] - dst[o11];
-      ++dst;
-    }
-
-    // main row
-    for (int x=0; x<img->width; ++x) {
-      *(dst) = (*psrc++) + dst[o10] + dst[o01] - dst[o11];
-      ++dst;
-    }
-
-    // right padding
-    for (int x=0; x<l; ++x) {
-      *(dst) = psrc[-1] + dst[o10] + dst[o01] - dst[o11];
-      ++dst;
-    }
-
-    dst += dstrem;
-
-  }
-
   return iimg;
 
 
 }
 
+*/
 
-
-void box_filter(const image_u8_t* src_img, 
-                image_u8_t* dst_img,
-                int sz) {
+void box_filter_border_replicate(const image_u8_t* src_img, 
+                                 image_u8_t* dst_img,
+                                 int sz) {
 
   if (!(src_img->width == dst_img->width &&
         src_img->height == dst_img->height)) {
@@ -267,11 +348,12 @@ void box_filter(const image_u8_t* src_img,
   int l = sz/2;
   sz = 2*l+1;
 
-  image_u32_t* tmp_img = integrate(src_img, l);
-
-  uint8_t* dst = dst_img->buf;
   int s2 = sz*sz;
   int s22 = s2/2; // for rounding?
+  
+  image_u32_t* tmp_img = integrate_border_replicate(src_img, l);
+
+  uint8_t* dst = dst_img->buf;
 
   const uint32_t* tmp = tmp_img->buf;
 
@@ -310,46 +392,18 @@ void box_threshold(const image_u8_t* src_img,
     exit(1);
   }
 
-
   int gt = invert ? 0 : max_value;
   int lt = max_value - gt;
-
-#if 0
-
-  image_u8_t* tmp_img = image_u8_create_alignment(src_img->width,
-                                                  src_img->height,
-                                                  1);
-
-  box_filter(src_img, tmp_img, sz);
-
-
-  const uint8_t* s = src_img->buf;
-  const uint8_t* t = tmp_img->buf;
-  uint8_t* res = dst_img->buf;
-
-  for (int y=0; y<src_img->height; ++y) {
-    for (int x=0; x<src_img->width; ++x) {
-      int sx = s[x];
-      int tx = t[x] - tau;
-      res[x] = sx > tx ? gt : lt;
-    }
-    s += src_img->stride;
-    t += tmp_img->stride;
-    res += dst_img->stride;
-  }
-                           
-  image_u8_destroy(tmp_img);
-
-#else
-
+  
   int l = sz/2;
   sz = 2*l+1;
 
-  image_u32_t* tmp_img = integrate(src_img, l);
-
-  uint8_t* dst = dst_img->buf;
   int s2 = sz*sz;
   int s22 = s2/2; // for rounding?
+
+  image_u32_t* tmp_img = integrate_border_replicate(src_img, l);
+
+  uint8_t* dst = dst_img->buf;
 
   const uint32_t* tmp = tmp_img->buf;
   const uint8_t* src = src_img->buf;
@@ -375,6 +429,128 @@ void box_threshold(const image_u8_t* src_img,
 
   image_u32_destroy(tmp_img);
 
-#endif
+}
+
+typedef struct block_info {
+
+  int bx; 
+  int by;
+
+  const uint8_t* src;
+  
+  int sstep;
+  int sstride;
+  
+  uint32_t* dst;
+  
+  int nx;
+  int ny;
+  
+  int is_central;
+  int is_finished;
+  
+} block_info_t;
+
+typedef struct integrate_info {
+
+  pthread_mutex_t mutex;
+  pthread_cond_t  cond;
+
+  int dstride;
+  
+  int num_blocks_x;
+  int num_blocks_y;
+  int total_blocks;
+
+  zarray_t* blocks;
+  
+  int* queue;
+
+  int queue_start;
+  int queue_end;
+  int finished;
+  
+} integrate_info_t;
+
+void integrate_task(void* p) {
+
+  integrate_info_t* info = (integrate_info_t*)p;
+
+  pthread_mutex_lock(&info->mutex);
+
+  // invariant: we hold the lock at the top of the loop here
+  while (!info->finished) { 
+
+    if (info->queue_start == info->queue_end) {
+
+      // if the queue is empty, wait for work to be placed into it (or
+      // for all work to be finished)
+      pthread_cond_wait(&info->cond, &info->mutex);
+      // note we regain the lock after this returns
+      
+    } else {
+
+      int idx = info->queue[info->queue_start];
+      block_info_t* block;
+      
+      zarray_get_volatile(info->blocks, idx, &block);
+        
+      ++info->queue_start;
+
+      pthread_mutex_unlock(&info->mutex);
+
+      if (block->is_central) {
+        integrate_block_center(block->src, block->sstride,
+                               block->dst, info->dstride);
+      } else {
+        integrate_block(block->src, block->sstep, block->sstride,
+                        block->dst, info->dstride,
+                        block->nx, block->ny);
+      }
+      
+      pthread_mutex_lock(&info->mutex);
+
+      block->is_finished = 1;
+      int do_broadcast = 0;
+
+      if (idx != (info->total_blocks-1)) { // not all done
+
+        // check above right 
+        if (block->bx + 1 < info->num_blocks_x && block->by > 0) {
+          int aridx = idx - info->num_blocks_x + 1;
+          block_info_t* ar;
+          zarray_get_volatile(info->blocks, aridx, &ar);
+          if (ar->is_finished) {
+            int ridx = idx + 1;
+            info->queue[info->queue_end++] = ridx;
+            do_broadcast = 1;
+          }
+        }
+
+        // check below left
+        if (block->by + 1 < info->num_blocks_y && block->bx > 0) {
+          int blidx = idx + info->num_blocks_x - 1;
+          block_info_t* bl;
+          zarray_get_volatile(info->blocks, blidx, &bl);
+          if (bl->is_finished) {
+            int bidx = idx + info->num_blocks_x;
+            info->queue[info->queue_end++] = bidx;
+            do_broadcast = 1;
+          }
+        }
+
+      } else { // all done
+
+        do_broadcast = 1;
+        info->finished = 1;
+        
+        
+      }
+      
+    }
+    
+  }
+
+  pthread_mutex_unlock(&info->mutex);
 
 }
