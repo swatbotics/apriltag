@@ -30,7 +30,7 @@ void test_integrate() {
 
   int lsizes[] = {
     //0, 2, 7, 15, -1
-    15, -1
+    7, -1
   };
 
   int max_iter = 100;
@@ -44,7 +44,7 @@ void test_integrate() {
     for (int k=0; lsizes[k]>=0; ++k) {
 
       int l = lsizes[k];
-      std::cout << "for size: " << isz << " with border " << l << "\n";
+      std::cout << "integrating size " << isz << " with border " << l << "\n";
         
       Mat8uc1 src(isz), src_b;
     
@@ -129,16 +129,17 @@ void test_integrate() {
 void test_box() {
 
   cv::Size img_sizes[] = {
-    cv::Size(4, 3),
-    cv::Size(64, 48),
-    cv::Size(640, 480),
+    //cv::Size(4, 3),
+    //cv::Size(64, 48),
+    //cv::Size(640, 480),
     cv::Size(800, 600),
-    cv::Size(1280, 960),
+    //cv::Size(1280, 960),
     cv::Size(0,0),
   };
 
   int box_sizes[] = {
-    3, 5, 15, 0,
+    //3, 5, 15, 0,
+    15, 0,
   };
 
   int max_iter = 100;
@@ -164,7 +165,7 @@ void test_box() {
       
       int64_t elapsed_mz = 0, elapsed_mz_mt = 0, elapsed_cv = 0;
 
-      std::cout << "for size " << isz << " with width " << bsz << "\n";
+      std::cout << "box filtering size " << isz << " with width " << bsz << "\n";
 
       for (int iter=0; iter<max_iter; ++iter) {
         if (iblur) { image_u8_destroy(iblur); }
@@ -287,8 +288,10 @@ void test_outer() {
 int main(int argc, char *argv[]) {
 
   //test_outer();
+  
+  test_integrate();
+  
   test_box();
-  //test_integrate();
 
   return 0;
 

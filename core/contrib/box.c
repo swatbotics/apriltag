@@ -21,6 +21,8 @@ image_u8_t* image_u8_aligned64(int width, int height) {
     stride += 64 - (stride & 0x3f);
   }
 
+  assert(stride % 64 == 0);
+
   void* vptr = 0;
 
   size_t size = height * stride * sizeof(uint8_t);
@@ -53,6 +55,8 @@ image_u32_t* image_u32_aligned64(int width, int height) {
     stride += 16 - (stride & 0xf);
   }
 
+  assert((stride * sizeof(uint32_t)) % 64 == 0);
+  
   void* vptr = 0;
 
   size_t size = height * stride * sizeof(uint32_t);
@@ -188,193 +192,32 @@ image_u32_t* integrate_border_replicate(const image_u8_t* img, int l) {
   
   return iimg;
 
-
 }
 
-/*
-static inline
-uint32_t iimg_lookup_with_border_center(const image_u32_t* iimg,
-                                        int sz, int i, int j) {
 
-  assert( i >= -sz && j >= -sz && i < iimg->height+sz && j < iimg->width+sz );
+static inline void box_filter_rows(uint8_t* dst_row, int dst_stride, 
+                                   const uint32_t* sum_row, int sum_stride,
+                                   int nx, int ny, int sz) {
 
-  uint32_t* b = iimg->buf;
-  int s = iimg->stride;
-
-  uint32_t s11 = b[iimg->stride + 1];
-  uint32_t sij = b[s*i+j];
-  uint32_t si1 = b[s*i+1];
-  uint32_t s1j = b[s + j];
-  return sij + sz*(sz*s11 + si1 + s1j);
+  int s2 = sz*sz;
+  int s22 = s2/2; // for rounding?
   
-}
+  int ob = sum_stride*sz;
+  int od = ob + sz;
 
-
-static inline
-uint32_t iimg_lookup_with_border(const image_u32_t* iimg,
-                                 int sz, int i, int j) {
-
-  assert( i >= -sz && j >= -sz && i < iimg->height+sz && j < iimg->width+sz );
-
-  int code = ( ((i < 0)<<3) | ((i >= iimg->height)<<2) |
-               ((j >= iimg->width)<<1) | (j < 0) );
-
-  uint32_t* b = iimg->buf;
-  int s = iimg->stride;
-
-  uint32_t s11 = b[iimg->stride + 1];
-
-  int H = iimg->height-1, h = H-1, W = iimg->width-1, w = W-1;
-
-  switch (code) {
-  case 0: { // middle
-    uint32_t sij = b[s*i+j];
-    uint32_t si1 = b[s*i+1];
-    uint32_t s1j = b[s + j];
-    return sij + sz*(sz*s11 + si1 + s1j);
-  }
-  case 9: { // above left
-    i += sz;
-    j += sz;
-    return s11 * i * j;
-  }
-  case 8: { // above
-    i += sz;
-    uint32_t s1j = b[s + j];
-    return (s1j + s11*sz)*i;
-  }
-  case 1: { // left
-    j += sz;
-    uint32_t si1 = b[s*i+1];
-    return (si1 + s11*sz)*j;
-  }
-  case 10: { // above right
-    uint32_t s1W = b[s + W];
-    uint32_t s1w = b[s + w];
-    j -= W;
-    i += sz;
-    return (s1W + (s1W-s1w)*j + s11*sz)*i;
-  }
-  case 5: { // below left
-    uint32_t sH1 = b[s*H+1];
-    uint32_t sh1 = b[s*h+1];
-    i -= H;
-    j += sz;
-    return (sH1 + (sH1-sh1)*i + s11*sz)*j;
-  }
-  case 2: { // right
-    uint32_t s1W = b[s + W];
-    uint32_t s1w = b[s + w];
-    uint32_t siW = b[s*i+W];
-    uint32_t siw = b[s*i+w];
-    uint32_t si1 = b[s*i+1];
-    j -= W;
-    return ( siW +
-             (s11*sz + si1 + s1W)*sz +
-             ((s1W - s1w)*sz + (siW - siw))*j );
-  }
-  case 4: { // below
-    uint32_t sH1 = b[s*H+1];
-    uint32_t sh1 = b[s*h+1];
-    uint32_t sHj = b[s*H+j];
-    uint32_t shj = b[s*h+j];
-    uint32_t s1j = b[s + j];
-    i -= H;
-    return ( sHj +
-             (s11*sz + s1j + sH1)*sz +
-             ((sH1 - sh1)*sz + (sHj - shj))*i );
-  }
-  case 6: { // below right
-
-    uint32_t s1W = b[s + W];
-    uint32_t s1w = b[s + w];
-    uint32_t sH1 = b[s*H+1];
-    uint32_t sh1 = b[s*h+1];
-    uint32_t sHW = b[s*H+W];
-    uint32_t sHw = b[s*H+w];
-    uint32_t shW = b[s*h+W];
-    uint32_t shw = b[s*h+w];
-
-    i -= H;
-    j -= W;
-
-    return ( sHW +
-             (s11*sz + sH1 + s1W)*sz +
-             ((sH1 - sh1)*sz + (sHW - shW)*(1+j) + (shw - sHw)*j)*i + 
-             ((s1W - s1w)*sz + (sHW - sHw))*j ); // 14 add, 8 multiply
-
-  }
-  default:
-    return 0;
-  }
-
-}
-
-image_u32_t* integral_copy_border_replicate(const image_u32_t* iimg,
-                                            int sz) {
-
-  image_u32_t* copy = image_u32_create(iimg->width+2*sz, iimg->height+2*sz);
-
-  uint32_t* dstrow = copy->buf;
-  
-  for (int y=0; y<copy->height; ++y) {
-    for (int x=0; x<copy->width; ++x) {
-      dstrow[x] = iimg_lookup_with_border(iimg, sz, y-sz, x-sz);
+  for (int y=0; y<ny; ++y) {
+    uint8_t* dst = dst_row;
+    const uint32_t* sum = sum_row;
+    for (int x=0; x<nx; ++x) {
+      *dst++ = (sum[od] - sum[ob] - sum[sz] + sum[0] + s22)/s2;
+      ++sum;
     }
-    dstrow += copy->stride;
+    dst_row += dst_stride;
+    sum_row += sum_stride;
   }
-
-  return copy;
-
-}
-
-
-image_u32_t* integrate(const image_u8_t* img) {
-
-  image_u32_t tmp;
-  tmp.width = img->width+1;
-  tmp.height = img->height+1;
-  tmp.stride = tmp.width;
-
-  if (tmp.stride & 0xf) {
-    tmp.stride += 16 - (tmp.stride & 0xf);
-  }
-
-  tmp.buf = (uint32_t*)malloc(tmp.height * tmp.stride * sizeof(uint32_t));
-
-  memset(tmp.buf, 0, tmp.width*sizeof(uint32_t));
-  image_u32_t* iimg = malloc(sizeof(image_u32_t));
-  memcpy(iimg, &tmp, sizeof(image_u32_t));
-
-  uint32_t* dst = iimg->buf + iimg->stride;
-  const uint8_t* src = img->buf;
-
-  int srcrem = img->stride - img->width;
-  int dstrem = iimg->stride - iimg->width;
-  int o10 = -1;
-  int o01 = -iimg->stride;
-  int o11 = o10 + o01;
-
-  for (int y=0; y<img->height; ++y) {
-
-    *dst++ = 0;
-
-    for (int x=0; x<img->width; ++x) {
-      *dst = (*src++) + dst[o10] + dst[o01] - dst[o11];
-      ++dst;
-    }
-
-    src += srcrem;
-    dst += dstrem;
-
-  }
-  
-  return iimg;
 
 
 }
-
-*/
 
 image_u8_t* box_filter_border_replicate(const image_u8_t* src_img, 
                                         int sz) {
@@ -384,34 +227,39 @@ image_u8_t* box_filter_border_replicate(const image_u8_t* src_img,
   int l = sz/2;
   sz = 2*l+1;
 
-  int s2 = sz*sz;
-  int s22 = s2/2; // for rounding?
-  
   image_u32_t* sum_img = integrate_border_replicate(src_img, l);
 
-  uint8_t* dst_row = dst_img->buf;
-
-  const uint32_t* sum_row = sum_img->buf;
-
-  int ob = sum_img->stride*sz;
-  int od = ob + sz;
-
-  for (int y=0; y<dst_img->height; ++y) {
-    uint8_t* dst = dst_row;
-    const uint32_t* sum = sum_row;
-    for (int x=0; x<dst_img->width; ++x) {
-      *dst++ = (sum[od] - sum[ob] - sum[sz] + sum[0] + s22)/s2;
-      ++sum;
-    }
-    dst_row += dst_img->stride;
-    sum_row += sum_img->stride;
-  }
+  box_filter_rows(dst_img->buf, dst_img->stride,
+                  sum_img->buf, sum_img->stride,
+                  src_img->width, src_img->height, sz);
 
   image_u32_destroy(sum_img);
 
   return dst_img;
 
 }
+
+typedef struct box_filter_info {
+  uint8_t* dst;
+  const uint32_t* sum;
+  int dst_stride;
+  int sum_stride;
+  int nx;
+  int ny;
+  int sz;
+} box_filter_info_t;
+
+
+static void box_filter_task(void* p) {
+
+  box_filter_info_t* info = (box_filter_info_t*)p;
+
+  box_filter_rows(info->dst, info->dst_stride,
+                  info->sum, info->sum_stride,
+                  info->nx, info->ny, info->sz);
+
+}
+
 
 image_u8_t* box_filter_border_replicate_mt(const image_u8_t* src_img, 
                                            int sz, workerpool_t* wp) {
@@ -420,28 +268,45 @@ image_u8_t* box_filter_border_replicate_mt(const image_u8_t* src_img,
 
   int l = sz/2;
   sz = 2*l+1;
-
-  int s2 = sz*sz;
-  int s22 = s2/2; // for rounding?
   
   image_u32_t* sum_img = integrate_border_replicate_mt(src_img, l, wp);
 
-  uint8_t* dst_row = dst_img->buf;
+  int nt = wp ? workerpool_get_nthreads(wp) : 1;
 
-  const uint32_t* sum_row = sum_img->buf;
+  if (wp == NULL || nt <= 1) {
 
-  int ob = sum_img->stride*sz;
-  int od = ob + sz;
+    box_filter_rows(dst_img->buf, dst_img->stride,
+                    sum_img->buf, sum_img->stride,
+                    src_img->width, src_img->height, sz);
 
-  for (int y=0; y<dst_img->height; ++y) {
-    uint8_t* dst = dst_row;
-    const uint32_t* sum = sum_row;
-    for (int x=0; x<dst_img->width; ++x) {
-      *dst++ = (sum[od] - sum[ob] - sum[sz] + sum[0] + s22)/s2;
-      ++sum;
+  } else {
+
+    int rows_per_block = src_img->height / nt;
+    if (src_img->height % nt) { ++rows_per_block; }
+
+    box_filter_info_t bfs[nt];
+
+    int y0 = 0;
+    uint8_t* dst_row = dst_img->buf;
+    const uint32_t* sum_row = sum_img->buf;
+
+    for (int i=0; i<nt; ++i) {
+      int y1 = y0 + rows_per_block;
+      if (y1 > src_img->height) { y1 = src_img->height; }
+      bfs[i].dst = dst_row;
+      bfs[i].sum = sum_row;
+      bfs[i].dst_stride = dst_img->stride;
+      bfs[i].sum_stride = sum_img->stride;
+      bfs[i].nx = dst_img->width;
+      bfs[i].ny = y1 - y0;
+      bfs[i].sz = sz;
+      dst_row += rows_per_block * dst_img->stride;
+      sum_row += rows_per_block * sum_img->stride;
+      workerpool_add_task(wp, box_filter_task, bfs+i);
     }
-    dst_row += dst_img->stride;
-    sum_row += sum_img->stride;
+
+    workerpool_run(wp);
+
   }
 
   image_u32_destroy(sum_img);
