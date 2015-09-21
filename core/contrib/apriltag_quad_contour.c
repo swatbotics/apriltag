@@ -11,10 +11,12 @@
 /* 
 
   TODO:
+
    - parallelize finding contours (if possible)
    - parallelize processing contours 
 
   DONE: 
+
    - april-style debug visualizations
    - parallelize integral images
    - parallelize box threshold
