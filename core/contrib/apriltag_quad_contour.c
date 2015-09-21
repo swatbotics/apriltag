@@ -8,8 +8,9 @@
 #include "lm.h"
 
 
-/* TODO:
+/* 
 
+  TODO:
    - parallelize finding contours (if possible)
    - parallelize processing contours 
 
