@@ -489,7 +489,108 @@ static inline int lines_from_corners_contour(const apriltag_detector_t* td,
 
 }
 
+static inline int quad_from_contour(const apriltag_detector_t* td,
+                                    const image_u8_t* im,
+                                    const contour_info_t* ci,
+                                    struct quad* q) {
 
+  
+  const int min_perimeter = 4*td->qcp.min_side_length;
+  const float min_area = td->qcp.min_side_length * td->qcp.min_side_length;
+
+  int n = zarray_size(ci->points);
+
+  if (!ci->is_outer || n < min_perimeter) {
+    return -1;
+  }
+
+  float ctr[2];
+  float area = fabs(contour_area_centroid(ci->points, ctr));
+
+  // area check
+  if (area < min_area) {
+    return 1;
+  }
+      
+  int idx[4];
+  float l, w;
+
+  q->H = 0;
+  q->Hinv = 0;
+    
+  quad_from_points(ci->points, ctr, q, idx, &l, &w);
+      
+  // diagonal aspect ratio check
+  if (w < td->qcp.min_aspect*l) {
+    return 2;
+  }
+
+  float sides[4][2];
+  float lmin, lmax;
+
+  get_quad_sides(q, sides, &lmin, &lmax);
+
+  // side aspect ratio check
+  if (lmin < td->qcp.min_aspect*lmax || lmin < td->qcp.min_side_length) {
+    return 2;
+  }
+
+  // max dist from quad check
+  float dmax = get_max_quad_dist(ci->points, sides, q);
+  if (dmax > td->qcp.point_dist_diam_scl*l+td->qcp.point_dist_bias) {
+    return 4;
+  }
+
+  int ok = 0;
+  g2d_line_t lines[4];
+
+  if (0) {
+    ok = lines_from_corners_fast(q, sides, lines);
+  } else {
+    ok = lines_from_corners_contour(td, im, ci, q, idx, lines);
+  }
+
+  if (!ok) {
+    return 5;
+  }
+
+  for (int i=0; i<4; ++i) {
+    lines[i].p[0] += 0.5;
+    lines[i].p[1] += 0.5;
+  }
+    
+  for (int i=0; i<4; ++i) {
+    int j = (i+1)&3; 
+    double p[2];
+    g2d_line_intersect_line(lines+i, lines+j, p);
+    q->p[i][0] = p[0];
+    q->p[i][1] = p[1];
+  }
+      
+  for (int i=0; ok && i<4; ++i) {
+    int j = (i+1)&3;
+    int k = (i+2)&3;
+    float tval = turn(q->p[i], q->p[j], q->p[k]);
+    if (tval < 0) {
+      ok = 0;
+      break;
+    }
+  }
+
+  if (!ok) {
+    return 6;
+  }
+
+
+  get_quad_sides(q, sides, &lmin, &lmax);
+  if (lmin < td->qcp.min_aspect*lmax || lmin < td->qcp.min_side_length) {
+    return 7;
+  }
+
+  return 0;
+    
+
+}
 
 zarray_t* quads_from_contours(const apriltag_detector_t* td,
                               const image_u8_t* im,
@@ -507,119 +608,15 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
 
     const contour_info_t* ci;
     zarray_get_volatile(contours, c, &ci);
-
-    const int min_perimeter = 4*td->qcp.min_side_length;
-    const float min_area = td->qcp.min_side_length * td->qcp.min_side_length;
-
-    int n = zarray_size(ci->points);
-
-    if (!ci->is_outer || n < min_perimeter) {
-      continue;
-    }
-
-    int fail_reason = 0;
-
-#define FAIL(r) do { fail_reason = (r); goto do_debug_vis; } while (0)
-
-    float ctr[2];
-    float area = fabs(contour_area_centroid(ci->points, ctr));
-
-    // area check
-    if (area < min_area) {
-      FAIL(1);
-    }
-      
-    int idx[4];
-    float l, w;
-
-    struct quad q = { .p={}, .H=0, .Hinv=0 };
     
-    quad_from_points(ci->points, ctr, &q, idx, &l, &w);
-      
-    // diagonal aspect ratio check
-    if (w < td->qcp.min_aspect*l) {
-      FAIL(2);
+    struct quad q;
+    int result = quad_from_contour(td, im, ci, &q);
+
+    if (result == 0) {
+      zarray_add(quads, &q);
     }
 
-    float sides[4][2];
-    float lmin, lmax;
-
-    get_quad_sides(&q, sides, &lmin, &lmax);
-
-    // side aspect ratio check
-    if (lmin < td->qcp.min_aspect*lmax || lmin < td->qcp.min_side_length) {
-      FAIL(3);
-    }
-
-    // max dist from quad check
-    float dmax = get_max_quad_dist(ci->points, sides, &q);
-    if (dmax > td->qcp.point_dist_diam_scl*l+td->qcp.point_dist_bias) {
-      FAIL(4);
-    }
-      
-    /*
-      printf("got contour with n=%d with area=%f, diameter=%f, and dmax=%f\n", n, area, l, dmax);
-      for (int i=0; i<4; ++i) {
-      int j = (i+1)%4;
-      printf("  contour[%d] = (%f, %f) with diff=%d\n",
-      idx[i], q.p[i][0], q.p[i][1], (idx[j]-idx[i]+n)%n);
-      }
-      printf("\n");
-    */
-
-    int ok = 0;
-    g2d_line_t lines[4];
-
-    if (0) {
-      ok = lines_from_corners_fast(&q, sides, lines);
-    } else {
-      ok = lines_from_corners_contour(td, im, ci, &q, idx, lines);
-    }
-
-    if (!ok) {
-      FAIL(5);
-    }
-
-    for (int i=0; i<4; ++i) {
-      lines[i].p[0] += 0.5;
-      lines[i].p[1] += 0.5;
-    }
-    
-    for (int i=0; i<4; ++i) {
-      int j = (i+1)&3; 
-      double p[2];
-      g2d_line_intersect_line(lines+i, lines+j, p);
-      q.p[i][0] = p[0];
-      q.p[i][1] = p[1];
-    }
-      
-    for (int i=0; ok && i<4; ++i) {
-      int j = (i+1)&3;
-      int k = (i+2)&3;
-      float tval = turn(q.p[i], q.p[j], q.p[k]);
-      if (tval < 0) {
-        ok = 0;
-        break;
-      }
-    }
-
-    if (!ok) {
-      FAIL(6);
-    }
-
-
-    get_quad_sides(&q, sides, &lmin, &lmax);
-    if (lmin < td->qcp.min_aspect*lmax || lmin < td->qcp.min_side_length) {
-      FAIL(7);
-    }
-
-    zarray_add(quads, &q);
-    
-    
-
-  do_debug_vis:
-
-    if (td->debug) {
+    if (td->debug && result >= 0) {
       uint32_t colors[8] = {
         MAKE_RGB(255,   0, 255), // success = mid purple
         MAKE_RGB(127,   0,   0), // area = dark red
@@ -630,14 +627,13 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
         MAKE_RGB(  0,   0, 127), // not CCW = dark blue
         MAKE_RGB(  0, 191,   0), // side 2 = mid green
       };
-      draw_contour(debug_vis, ci->points, colors[fail_reason%8]);
+      draw_contour(debug_vis, ci->points, colors[result % 8]);
     }
-
+    
   }
 
   if (td->debug) {
-    image_u32_write_pnm(debug_vis, "debug_quad_contour.pnm");
-    image_u32_destroy(debug_vis);
+    image_u32_write_pnm(debug_vis, "debug_quad_contours.pnm");
   }
 
   return quads;
