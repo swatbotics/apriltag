@@ -36,7 +36,7 @@ image_u32_t* aligned_image_64bit(int width, int height) {
 }
 
 enum {
-  INTEGRATE_BLOCK_SIZE = 4,
+  INTEGRATE_BLOCK_SIZE = 16,
 };
 
 static inline void integrate_block_center(const uint8_t* src, int sstride,
@@ -598,10 +598,6 @@ image_u32_t* integrate_border_replicate_mt(const image_u8_t* img, int l,
   int r1 = nbl, r2 = nbl + nby;
   int c1 = nbl, c2 = nbl + nbx;
 
-  const uint8_t* srcend = img->buf + (img->height-1)*img->stride + img->width;
-  const uint32_t* dstend = iimg->buf + (iimg->height-1)*iimg->stride + iimg->width;
-
-
   for (int by=0; by<info.num_blocks_y; ++by) {
     for (int bx=0; bx<info.num_blocks_x; ++bx) {
 
@@ -676,46 +672,17 @@ image_u32_t* integrate_border_replicate_mt(const image_u8_t* img, int l,
         int dy = (cur_block->dst - iimg->buf) / iimg->stride;
         int dx = (cur_block->dst - iimg->buf) % iimg->stride;
 
-        assert(cur_block->src >= img->buf &&
-               cur_block->src < img->buf + (img->height-1)*img->stride + img->width);
-
-        assert(cur_block->dst >= iimg->buf &&
-               cur_block->dst < iimg->buf + (iimg->height-1)*iimg->stride + iimg->width);
-
-        const uint8_t* send = cur_block->src + (cur_block->ny-1) * cur_block->sstride + cur_block->nx * cur_block->sstep;
-        const uint32_t* dend = cur_block->dst + (cur_block->ny-1) * iimg->stride + cur_block->nx;
-
-        
         printf("adding block #%d at (%d, %d)\n", (int)(cur_block-info.blocks),
                cur_block->bx, cur_block->by);
-
         printf("  src is %p, offset into img at (%d, %d)\n",
                cur_block->src, sx, sy);
-
         printf("  sstep=%d\n", cur_block->sstep);
         printf("  sstride=%d\n", cur_block->sstride);
-
         printf("  dst is %p, offset into iimg at (%d, %d)\n",
                cur_block->dst, dx, dy);
-
         printf("  block size is %dx%d\n", cur_block->nx, cur_block->ny);
-
         printf("  is_central=%d\n", cur_block->is_central);
-
-        printf("  xstart=%d, xend=%d, rx=%d, x0=%d, x1=%d\n", xstart, xend, rx, x0, x1);
-        printf("  ystart=%d, yend=%d, ry=%d, y0=%d, y1=%d\n", ystart, yend, ry, y0, y1);
- 
-        printf("  img is (%dx%d)\n", img->width, img->height);
-        printf("  iimg is (%dx%d)\n", iimg->width, iimg->height);
-
-        printf("  sdiff is %d\n", (int)(srcend-send));
-        printf("  ddiff is %d\n", (int)(dstend-dend));
-
-
         printf("\n");
-
-        assert(send <= srcend);
-        assert(dend <= dstend);
         
       }
       
