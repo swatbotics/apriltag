@@ -6,7 +6,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <pthread.h>
-#include "zarray.h"
 
 image_u32_t* aligned_image_64bit(int width, int height) {
 
@@ -37,7 +36,7 @@ image_u32_t* aligned_image_64bit(int width, int height) {
 }
 
 enum {
-  INTEGRATE_BLOCK_SIZE = 16
+  INTEGRATE_BLOCK_SIZE = 4,
 };
 
 static inline void integrate_block_center(const uint8_t* src, int sstride,
@@ -79,6 +78,8 @@ static inline void integrate_block(const uint8_t* src, int sstep, int sstride,
                                   
 
 image_u32_t* integrate_border_replicate(const image_u8_t* img, int l) {
+
+  return integrate_border_replicate_mt(img, l, NULL);
 
   image_u32_t* iimg = aligned_image_64bit(img->width + 2*l + 1,
                                           img->height + 2*l + 1);
@@ -431,6 +432,7 @@ void box_threshold(const image_u8_t* src_img,
 
 }
 
+
 typedef struct block_info {
 
   int bx; 
@@ -445,9 +447,9 @@ typedef struct block_info {
   
   int nx;
   int ny;
-  
+
   int is_central;
-  int is_finished;
+  int status; // 0 = not yet enqueued, 1 = pending, 2 = finished
   
 } block_info_t;
 
@@ -462,7 +464,7 @@ typedef struct integrate_info {
   int num_blocks_y;
   int total_blocks;
 
-  zarray_t* blocks;
+  block_info_t* blocks;
   
   int* queue;
 
@@ -491,10 +493,9 @@ void integrate_task(void* p) {
     } else {
 
       int idx = info->queue[info->queue_start];
-      block_info_t* block;
+      block_info_t* block = info->blocks + idx;
+      assert(block->status == 1);
       
-      zarray_get_volatile(info->blocks, idx, &block);
-        
       ++info->queue_start;
 
       pthread_mutex_unlock(&info->mutex);
@@ -510,31 +511,31 @@ void integrate_task(void* p) {
       
       pthread_mutex_lock(&info->mutex);
 
-      block->is_finished = 1;
+      block->status = 2;
       int do_broadcast = 0;
 
       if (idx != (info->total_blocks-1)) { // not all done
 
         // check above right 
         if (block->bx + 1 < info->num_blocks_x && block->by > 0) {
-          int aridx = idx - info->num_blocks_x + 1;
-          block_info_t* ar;
-          zarray_get_volatile(info->blocks, aridx, &ar);
-          if (ar->is_finished) {
-            int ridx = idx + 1;
+          int ridx = idx + 1;
+          int aridx = ridx - info->num_blocks_x;
+          if (info->blocks[aridx].status == 2 &&
+              info->blocks[ridx].status == 0) {
             info->queue[info->queue_end++] = ridx;
+            info->blocks[ridx].status = 1;
             do_broadcast = 1;
           }
         }
 
         // check below left
         if (block->by + 1 < info->num_blocks_y && block->bx > 0) {
-          int blidx = idx + info->num_blocks_x - 1;
-          block_info_t* bl;
-          zarray_get_volatile(info->blocks, blidx, &bl);
-          if (bl->is_finished) {
-            int bidx = idx + info->num_blocks_x;
+          int bidx = idx + info->num_blocks_x;
+          int blidx = bidx - 1;
+          if (info->blocks[blidx].status == 2 &&
+              info->blocks[bidx].status == 0) {
             info->queue[info->queue_end++] = bidx;
+            info->blocks[bidx].status = 1;
             do_broadcast = 1;
           }
         }
@@ -544,7 +545,10 @@ void integrate_task(void* p) {
         do_broadcast = 1;
         info->finished = 1;
         
-        
+      }
+
+      if (do_broadcast) {
+        pthread_cond_broadcast(&info->cond);
       }
       
     }
@@ -552,5 +556,194 @@ void integrate_task(void* p) {
   }
 
   pthread_mutex_unlock(&info->mutex);
+
+}
+
+image_u32_t* integrate_border_replicate_mt(const image_u8_t* img, int l,
+                                           workerpool_t* wp) {
+
+  image_u32_t* iimg = aligned_image_64bit(img->width + 2*l + 1,
+                                          img->height + 2*l + 1);
+
+  // zero out first line
+  memset(iimg->buf, 0, sizeof(uint32_t)*iimg->width);
+  uint32_t* dl = iimg->buf + iimg->stride;
+  
+  // zero out first row of each line
+  for (int y=1; y<iimg->height; ++y) {
+    *dl = 0 ;
+    dl += iimg->stride;
+  }
+
+  //memset(iimg->buf, 0, sizeof(uint32_t)*iimg->height*iimg->stride);
+
+  integrate_info_t info;
+  pthread_mutex_init(&info.mutex, NULL);
+  pthread_cond_init(&info.cond, NULL);
+  info.dstride = iimg->stride;
+
+  int nbl = l ? (l / INTEGRATE_BLOCK_SIZE) + (l % INTEGRATE_BLOCK_SIZE ? 1 : 0) : 0;
+  int nbx = (img->width / INTEGRATE_BLOCK_SIZE) + (img->width % INTEGRATE_BLOCK_SIZE ? 1 : 0);
+  int nby = (img->height / INTEGRATE_BLOCK_SIZE) + (img->height % INTEGRATE_BLOCK_SIZE ? 1 : 0);
+
+  info.num_blocks_x = nbx + 2*nbl;
+  info.num_blocks_y = nby + 2*nbl;
+  info.total_blocks = info.num_blocks_x * info.num_blocks_y;
+
+  info.blocks = malloc(sizeof(block_info_t)*info.total_blocks);
+  info.queue = malloc(sizeof(int)*info.total_blocks);
+
+  block_info_t* cur_block = info.blocks;
+
+  int r1 = nbl, r2 = nbl + nby;
+  int c1 = nbl, c2 = nbl + nbx;
+
+  const uint8_t* srcend = img->buf + (img->height-1)*img->stride + img->width;
+  const uint32_t* dstend = iimg->buf + (iimg->height-1)*iimg->stride + iimg->width;
+
+
+  for (int by=0; by<info.num_blocks_y; ++by) {
+    for (int bx=0; bx<info.num_blocks_x; ++bx) {
+
+      cur_block->bx = bx;
+      cur_block->by = by;
+      
+      cur_block->src = img->buf;
+
+      int xstart, xend, rx;
+
+      if (bx < c1) { // LEFT
+        cur_block->sstep = 0;
+        xstart = 0;
+        xend = l;
+        rx = bx;
+      } else if (bx < c2) { // MIDDLE
+        cur_block->sstep = 1;
+        xstart = l;
+        xend = img->width + l;
+        rx = bx-c1;
+      } else { // RIGHT
+        cur_block->src += img->width-1;
+        cur_block->sstep = 0;
+        xstart = img->width + l;
+        xend = xstart + l;
+        rx = bx-c2;
+      }
+
+      int ystart, yend, ry;
+
+      if (by < r1) { // TOP
+        cur_block->sstride = 0;
+        ystart = 0;
+        yend = l;
+        ry = by;
+      } else if (by < r2) { // MIDDLE
+        cur_block->sstride = img->stride;
+        ystart = l;
+        yend = img->height + l;
+        ry = by-r1;
+      } else { // BOTTOM
+        cur_block->src += (img->height-1)*img->stride;
+        cur_block->sstride = 0;
+        ystart = img->height + l;
+        yend = ystart + l;
+        ry = by-r2;
+      }
+
+      int x0 = xstart + rx * INTEGRATE_BLOCK_SIZE;
+      int y0 = ystart + ry * INTEGRATE_BLOCK_SIZE;
+
+      int x1 = x0 + INTEGRATE_BLOCK_SIZE;
+      int y1 = y0 + INTEGRATE_BLOCK_SIZE;
+
+      if (x1 > xend) { x1 = xend; }
+      if (y1 > yend) { y1 = yend; }
+
+      cur_block->src += ( (ry * INTEGRATE_BLOCK_SIZE) * cur_block->sstride +
+                          (rx * INTEGRATE_BLOCK_SIZE) * cur_block->sstep );
+      cur_block->dst = iimg->buf + x0 + y0*iimg->stride;
+
+      cur_block->nx = x1-x0;
+      cur_block->ny = y1-y0;
+
+      cur_block->is_central = 0;
+
+      if (0) {
+
+        int sy = (cur_block->src - img->buf) / img->stride;
+        int sx = (cur_block->src - img->buf) % img->stride;
+
+        int dy = (cur_block->dst - iimg->buf) / iimg->stride;
+        int dx = (cur_block->dst - iimg->buf) % iimg->stride;
+
+        assert(cur_block->src >= img->buf &&
+               cur_block->src < img->buf + (img->height-1)*img->stride + img->width);
+
+        assert(cur_block->dst >= iimg->buf &&
+               cur_block->dst < iimg->buf + (iimg->height-1)*iimg->stride + iimg->width);
+
+        const uint8_t* send = cur_block->src + (cur_block->ny-1) * cur_block->sstride + cur_block->nx * cur_block->sstep;
+        const uint32_t* dend = cur_block->dst + (cur_block->ny-1) * iimg->stride + cur_block->nx;
+
+        
+        printf("adding block #%d at (%d, %d)\n", (int)(cur_block-info.blocks),
+               cur_block->bx, cur_block->by);
+
+        printf("  src is %p, offset into img at (%d, %d)\n",
+               cur_block->src, sx, sy);
+
+        printf("  sstep=%d\n", cur_block->sstep);
+        printf("  sstride=%d\n", cur_block->sstride);
+
+        printf("  dst is %p, offset into iimg at (%d, %d)\n",
+               cur_block->dst, dx, dy);
+
+        printf("  block size is %dx%d\n", cur_block->nx, cur_block->ny);
+
+        printf("  is_central=%d\n", cur_block->is_central);
+
+        printf("  xstart=%d, xend=%d, rx=%d, x0=%d, x1=%d\n", xstart, xend, rx, x0, x1);
+        printf("  ystart=%d, yend=%d, ry=%d, y0=%d, y1=%d\n", ystart, yend, ry, y0, y1);
+ 
+        printf("  img is (%dx%d)\n", img->width, img->height);
+        printf("  iimg is (%dx%d)\n", iimg->width, iimg->height);
+
+        printf("  sdiff is %d\n", (int)(srcend-send));
+        printf("  ddiff is %d\n", (int)(dstend-dend));
+
+
+        printf("\n");
+
+        assert(send <= srcend);
+        assert(dend <= dstend);
+        
+      }
+      
+        
+      ++cur_block;
+      
+    }
+
+  }
+  
+  info.queue[0] = 0;
+  info.queue_start = 0;
+  info.queue_end = 1;
+  info.blocks[0].status = 1;
+  info.finished = 0;
+
+  memset(iimg->buf, 0, 4*iimg->stride*iimg->height);
+
+  for (int i=0; i<info.total_blocks; ++i) {
+
+    cur_block = info.blocks + i;
+
+    integrate_block(cur_block->src, cur_block->sstep, cur_block->sstride,
+                    cur_block->dst, info.dstride, cur_block->nx, cur_block->ny);
+
+    
+  }
+
+  return iimg;
 
 }
