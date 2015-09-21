@@ -13,27 +13,24 @@
 #include "workerpool.h"
 #include <pthread.h>
 
+const cv::Size img_sizes[] = {
+  //cv::Size(4, 3),
+  //cv::Size(64, 48),
+  //cv::Size(640, 480),
+  cv::Size(800, 600),
+  //cv::Size(1280, 960),
+  //cv::Size(2560, 1920),
+  cv::Size(0,0),
+};
 
+const int box_sizes[] = {
+  //1, 5, 15, 0,
+  15, 0
+};
 
+const int max_iter = 100;
 
 void test_integrate() {
-
-  cv::Size img_sizes[] = {
-    //cv::Size(4, 3),
-    //cv::Size(64, 48),
-    //cv::Size(640, 480),
-    cv::Size(800, 600),
-    //cv::Size(1280, 960),
-    //cv::Size(2560, 1920),
-    cv::Size(0,0),
-  };
-
-  int lsizes[] = {
-    //0, 2, 7, 15, -1
-    7, -1
-  };
-
-  int max_iter = 100;
 
   workerpool_t* wp = workerpool_create(4);
 
@@ -41,9 +38,10 @@ void test_integrate() {
 
     cv::Size isz = img_sizes[i];
     
-    for (int k=0; lsizes[k]>=0; ++k) {
+    for (int b=0; box_sizes[b]; ++b) {
 
-      int l = lsizes[k];
+      int l = box_sizes[b]/2;
+
       std::cout << "integrating size " << isz << " with border " << l << "\n";
         
       Mat8uc1 src(isz), src_b;
@@ -128,22 +126,6 @@ void test_integrate() {
 
 void test_box() {
 
-  cv::Size img_sizes[] = {
-    //cv::Size(4, 3),
-    //cv::Size(64, 48),
-    //cv::Size(640, 480),
-    cv::Size(800, 600),
-    //cv::Size(1280, 960),
-    cv::Size(0,0),
-  };
-
-  int box_sizes[] = {
-    //3, 5, 15, 0,
-    15, 0,
-  };
-
-  int max_iter = 100;
-
   workerpool_t* wp = workerpool_create(4);
 
   for (int i=0; img_sizes[i].width; ++i) {
@@ -227,67 +209,7 @@ void test_box() {
 
 }
 
-
-void test_outer() {
-
-  int scl = 7;
-
-  cv::Mat src = cv::imread("../thresh_tiny.png", CV_LOAD_IMAGE_GRAYSCALE);
-  if (src.empty()) {
-    fprintf(stderr, "nope!\n");
-    exit(1);
-  }
-  
-  image_u8_t s8 = cv2im8(src);
-
-  std::cout << "src has size " << src.size() << "\n";
-
-  zarray_t* contours = contour_detect(&s8);
-
-  std::cout << "got " << zarray_size(contours) << " contours\n";
-
-  cv::Mat big1;
-  cv::resize(src, big1, src.size()*scl, 0, 0, cv::INTER_NEAREST);
-  cv::Mat tmp;
-  cv::cvtColor(big1, tmp, cv::COLOR_GRAY2RGB);
-  big1 = tmp;
-
-  big1 = big1/2 + 63;
-  cv::Mat big2 = big1.clone();
-
-  for (int i=0; i<zarray_size(contours); ++i) {
-    const contour_info_t* ci;
-    zarray_get_volatile(contours, i, &ci);
-    
-    if (ci->is_outer) {
-      
-      cv::Scalar color = random_color();
-      polylines(big1, ci->points, color, true, scl);
-
-      zarray_t* outer = contour_outer_boundary(ci, 0, zarray_size(ci->points));
-
-      polylines(big2, outer, color, false, scl);
-
-      zarray_destroy(outer);
-      
-    }
-
-  }
-
-  while (1) {
-    cv::imshow("win", big1);
-    cv::waitKey();
-    cv::imshow("win", big2);
-    cv::waitKey();
-  }
-    
-
-}
-
-
 int main(int argc, char *argv[]) {
-
-  //test_outer();
   
   test_integrate();
   

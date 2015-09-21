@@ -125,6 +125,7 @@ static inline void integrate_block(const uint8_t* src, int sstep, int sstride,
 image_u32_t* integrate_border_replicate(const image_u8_t* img, int l) {
 
   return integrate_border_replicate_mt(img, l, NULL);
+  /*
 
   image_u32_t* iimg = image_u32_aligned64(img->width + 2*l + 1,
                                           img->height + 2*l + 1);
@@ -139,58 +140,10 @@ image_u32_t* integrate_border_replicate(const image_u8_t* img, int l) {
     dl += iimg->stride;
   }
   
-  const uint8_t* src = img->buf;
-
-  uint32_t* dst = iimg->buf;
-  int ds = iimg->stride;
-  int ss = img->stride;
-
-  int W = img->width, w = W-1, H = img->height, h = H-1;
-    
-  //////////////////////////////////////////////////////////////////////
-  // TOP PADDING
-
-  integrate_block(src, 0, 0, dst, ds, l, l);
-
-  dst += l;
-
-  integrate_block(src, 1, 0, dst, ds, W, l);
-
-  dst += W;
-
-  integrate_block(src + w, 0, 0, dst, ds, l, l);
-
-  //////////////////////////////////////////////////////////////////////
-  // MIDDLE ROWS
-
-  dst = iimg->buf + ds*l;
-
-  integrate_block(src, 0, ss, dst, ds,l, H);
-
-  dst += l;
-
-  integrate_block(src, 1, ss, dst, ds, W, H);
-
-  dst += W;
-
-  integrate_block(src + w, 0, ss, dst, ds, l, H);
-  
-  //////////////////////////////////////////////////////////////////////
-  // BOTTOM PADDING
-
-  dst = iimg->buf + ds*(l + H);
-
-  integrate_block(src + h*ss, 0, 0, dst, ds, l, l);
-
-  dst += l;
-
-  integrate_block(src + h*ss, 1, 0, dst, ds, W, l);
-
-  dst += W;
-
-  integrate_block(src + h*ss + w, 0, 0, dst, ds, l, l);
   
   return iimg;
+
+  */
 
 }
 
@@ -222,6 +175,10 @@ static inline void box_filter_rows(uint8_t* dst_row, int dst_stride,
 image_u8_t* box_filter_border_replicate(const image_u8_t* src_img, 
                                         int sz) {
 
+  return box_filter_border_replicate_mt(src_img, sz, 0);
+
+  /*
+
   image_u8_t* dst_img = image_u8_aligned64(src_img->width, src_img->height);
 
   int l = sz/2;
@@ -236,6 +193,9 @@ image_u8_t* box_filter_border_replicate(const image_u8_t* src_img,
   image_u32_destroy(sum_img);
 
   return dst_img;
+
+  */
+
 
 }
 
@@ -259,7 +219,6 @@ static void box_filter_task(void* p) {
                   info->nx, info->ny, info->sz);
 
 }
-
 
 image_u8_t* box_filter_border_replicate_mt(const image_u8_t* src_img, 
                                            int sz, workerpool_t* wp) {
@@ -564,14 +523,10 @@ image_u32_t* integrate_border_replicate_mt(const image_u8_t* img, int l,
     dl += iimg->stride;
   }
 
-  //memset(iimg->buf, 0, sizeof(uint32_t)*iimg->height*iimg->stride);
 
   integrate_info_t info;
-  pthread_mutex_init(&info.mutex, NULL);
-  pthread_cond_init(&info.cond, NULL);
-  info.dstride = iimg->stride;
 
-  int nbl = l ? (l / INTEGRATE_BLOCK_SIZE) + (l % INTEGRATE_BLOCK_SIZE ? 1 : 0) : 0;
+  int nbl = (l / INTEGRATE_BLOCK_SIZE) + (l % INTEGRATE_BLOCK_SIZE ? 1 : 0);
   int nbx = (img->width / INTEGRATE_BLOCK_SIZE) + (img->width % INTEGRATE_BLOCK_SIZE ? 1 : 0);
   int nby = (img->height / INTEGRATE_BLOCK_SIZE) + (img->height % INTEGRATE_BLOCK_SIZE ? 1 : 0);
 
@@ -579,156 +534,162 @@ image_u32_t* integrate_border_replicate_mt(const image_u8_t* img, int l,
   info.num_blocks_y = nby + 2*nbl;
   info.total_blocks = info.num_blocks_x * info.num_blocks_y;
 
-  info.blocks = malloc(sizeof(block_info_t)*info.total_blocks);
-  info.queue = malloc(sizeof(int)*info.total_blocks);
-
-  block_info_t* cur_block = info.blocks;
-
-  int r1 = nbl, r2 = nbl + nby;
-  int c1 = nbl, c2 = nbl + nbx;
-
-  for (int by=0; by<info.num_blocks_y; ++by) {
-    for (int bx=0; bx<info.num_blocks_x; ++bx) {
-
-      cur_block->bx = bx;
-      cur_block->by = by;
-      
-      cur_block->src = img->buf;
-
-      int xstart, xend, rx;
-
-      if (bx < c1) { // LEFT
-        cur_block->sstep = 0;
-        xstart = 0;
-        xend = l;
-        rx = bx;
-      } else if (bx < c2) { // MIDDLE
-        cur_block->sstep = 1;
-        xstart = l;
-        xend = img->width + l;
-        rx = bx-c1;
-      } else { // RIGHT
-        cur_block->src += img->width-1;
-        cur_block->sstep = 0;
-        xstart = img->width + l;
-        xend = xstart + l;
-        rx = bx-c2;
-      }
-
-      int ystart, yend, ry;
-
-      if (by < r1) { // TOP
-        cur_block->sstride = 0;
-        ystart = 0;
-        yend = l;
-        ry = by;
-      } else if (by < r2) { // MIDDLE
-        cur_block->sstride = img->stride;
-        ystart = l;
-        yend = img->height + l;
-        ry = by-r1;
-      } else { // BOTTOM
-        cur_block->src += (img->height-1)*img->stride;
-        cur_block->sstride = 0;
-        ystart = img->height + l;
-        yend = ystart + l;
-        ry = by-r2;
-      }
-
-      int x0 = xstart + rx * INTEGRATE_BLOCK_SIZE;
-      int y0 = ystart + ry * INTEGRATE_BLOCK_SIZE;
-
-      int x1 = x0 + INTEGRATE_BLOCK_SIZE;
-      int y1 = y0 + INTEGRATE_BLOCK_SIZE;
-
-      if (x1 > xend) { x1 = xend; }
-      if (y1 > yend) { y1 = yend; }
-
-      cur_block->src +=  (ry * cur_block->sstride + 
-                          rx * cur_block->sstep) * INTEGRATE_BLOCK_SIZE;
-      
-      cur_block->dst = iimg->buf + x0 + y0*iimg->stride;
-
-      cur_block->nx = x1-x0;
-      cur_block->ny = y1-y0;
-
-      cur_block->status = 0;
-
-      cur_block->is_central =
-        (INTEGRATE_ALLOW_CENTRAL &&
-         cur_block->sstride && cur_block->sstep &&
-         cur_block->nx == INTEGRATE_BLOCK_SIZE &&
-         cur_block->ny == INTEGRATE_BLOCK_SIZE);
-
-      if (0) {
-
-        int sy = (cur_block->src - img->buf) / img->stride;
-        int sx = (cur_block->src - img->buf) % img->stride;
-
-        int dy = (cur_block->dst - iimg->buf) / iimg->stride;
-        int dx = (cur_block->dst - iimg->buf) % iimg->stride;
-
-        printf("adding block #%d at (%d, %d)\n", (int)(cur_block-info.blocks),
-               cur_block->bx, cur_block->by);
-        printf("  src is %p, offset into img at (%d, %d)\n",
-               cur_block->src, sx, sy);
-        printf("  sstep=%d\n", cur_block->sstep);
-        printf("  sstride=%d\n", cur_block->sstride);
-        printf("  dst is %p, offset into iimg at (%d, %d)\n",
-               cur_block->dst, dx, dy);
-        printf("  block size is %dx%d\n", cur_block->nx, cur_block->ny);
-        printf("  is_central=%d\n", cur_block->is_central);
-        printf("\n");
-        
-      }
-      
-        
-      ++cur_block;
-      
-    }
-
-  }
-  
-  info.queue[0] = 0;
-  info.queue_start = 0;
-  info.queue_end = 1;
-  info.blocks[0].status = 1;
-  info.finished = 0;
-
-  memset(iimg->buf, 0, 4*iimg->stride*iimg->height);
-
   int nt = wp ? workerpool_get_nthreads(wp) : 1;
-
   int blocks_per_thread = info.total_blocks / nt;
 
   if (wp == NULL || nt <= 1 ||
       blocks_per_thread < INTEGRATE_MIN_BLOCKS_PER_THREAD) {
 
-    for (int i=0; i<info.total_blocks; ++i) {
+    const uint8_t* src = img->buf;
 
-      cur_block = info.blocks + i;
+    uint32_t* dst = iimg->buf;
+    int ds = iimg->stride;
+    int ss = img->stride;
 
-      if (cur_block->bx) {
-        assert(info.blocks[i-1].status == 2);
-      }
-      if (cur_block->by) {
-        assert(info.blocks[i-info.num_blocks_x].status == 2);
-      }
-
-      if (INTEGRATE_ALLOW_CENTRAL && cur_block->is_central) {
-        integrate_block_center(cur_block->src, cur_block->sstride,
-                               cur_block->dst, info.dstride);
-      } else {
-        integrate_block(cur_block->src, cur_block->sstep, cur_block->sstride,
-                        cur_block->dst, info.dstride, cur_block->nx, cur_block->ny);
-      }
-
-      cur_block->status = 2;
+    int W = img->width, w = W-1, H = img->height, h = H-1;
     
-    }
+    //////////////////////////////////////////////////////////////////////
+    // TOP PADDING
+
+    integrate_block(src, 0, 0, dst, ds, l, l);
+
+    dst += l;
+
+    integrate_block(src, 1, 0, dst, ds, W, l);
+
+    dst += W;
+
+    integrate_block(src + w, 0, 0, dst, ds, l, l);
+
+    //////////////////////////////////////////////////////////////////////
+    // MIDDLE ROWS
+
+    dst = iimg->buf + ds*l;
+
+    integrate_block(src, 0, ss, dst, ds,l, H);
+
+    dst += l;
+
+    integrate_block(src, 1, ss, dst, ds, W, H);
+
+    dst += W;
+
+    integrate_block(src + w, 0, ss, dst, ds, l, H);
+  
+    //////////////////////////////////////////////////////////////////////
+    // BOTTOM PADDING
+
+    dst = iimg->buf + ds*(l + H);
+
+    integrate_block(src + h*ss, 0, 0, dst, ds, l, l);
+
+    dst += l;
+
+    integrate_block(src + h*ss, 1, 0, dst, ds, W, l);
+
+    dst += W;
+
+    integrate_block(src + h*ss + w, 0, 0, dst, ds, l, l);
+    
 
   } else {
+  
+    pthread_mutex_init(&info.mutex, NULL);
+    pthread_cond_init(&info.cond, NULL);
+    info.dstride = iimg->stride;
 
+    info.blocks = malloc(sizeof(block_info_t)*info.total_blocks);
+    info.queue = malloc(sizeof(int)*info.total_blocks);
+
+    block_info_t* cur_block = info.blocks;
+
+    int r1 = nbl, r2 = nbl + nby;
+    int c1 = nbl, c2 = nbl + nbx;
+
+    for (int by=0; by<info.num_blocks_y; ++by) {
+      for (int bx=0; bx<info.num_blocks_x; ++bx) {
+
+        cur_block->bx = bx;
+        cur_block->by = by;
+      
+        cur_block->src = img->buf;
+
+        int xstart, xend, rx;
+
+        if (bx < c1) { // LEFT
+          cur_block->sstep = 0;
+          xstart = 0;
+          xend = l;
+          rx = bx;
+        } else if (bx < c2) { // MIDDLE
+          cur_block->sstep = 1;
+          xstart = l;
+          xend = img->width + l;
+          rx = bx-c1;
+        } else { // RIGHT
+          cur_block->src += img->width-1;
+          cur_block->sstep = 0;
+          xstart = img->width + l;
+          xend = xstart + l;
+          rx = bx-c2;
+        }
+
+        int ystart, yend, ry;
+
+        if (by < r1) { // TOP
+          cur_block->sstride = 0;
+          ystart = 0;
+          yend = l;
+          ry = by;
+        } else if (by < r2) { // MIDDLE
+          cur_block->sstride = img->stride;
+          ystart = l;
+          yend = img->height + l;
+          ry = by-r1;
+        } else { // BOTTOM
+          cur_block->src += (img->height-1)*img->stride;
+          cur_block->sstride = 0;
+          ystart = img->height + l;
+          yend = ystart + l;
+          ry = by-r2;
+        }
+
+        int x0 = xstart + rx * INTEGRATE_BLOCK_SIZE;
+        int y0 = ystart + ry * INTEGRATE_BLOCK_SIZE;
+
+        int x1 = x0 + INTEGRATE_BLOCK_SIZE;
+        int y1 = y0 + INTEGRATE_BLOCK_SIZE;
+
+        if (x1 > xend) { x1 = xend; }
+        if (y1 > yend) { y1 = yend; }
+
+        cur_block->src +=  (ry * cur_block->sstride + 
+                            rx * cur_block->sstep) * INTEGRATE_BLOCK_SIZE;
+      
+        cur_block->dst = iimg->buf + x0 + y0*iimg->stride;
+
+        cur_block->nx = x1-x0;
+        cur_block->ny = y1-y0;
+
+        cur_block->status = 0;
+
+        cur_block->is_central =
+          (INTEGRATE_ALLOW_CENTRAL &&
+           cur_block->sstride && cur_block->sstep &&
+           cur_block->nx == INTEGRATE_BLOCK_SIZE &&
+           cur_block->ny == INTEGRATE_BLOCK_SIZE);
+
+        ++cur_block;
+      
+      }
+
+    }
+  
+    info.queue[0] = 0;
+    info.queue_start = 0;
+    info.queue_end = 1;
+    info.blocks[0].status = 1;
+    info.finished = 0;
 
     //printf("adding tasks...\n");
 
@@ -746,8 +707,10 @@ image_u32_t* integrate_border_replicate_mt(const image_u8_t* img, int l,
 
     workerpool_run(wp);
     //workerpool_run_single(wp);
-
     //printf("done!\n");
+
+    free(info.blocks);
+    free(info.queue);
     
   }
 
