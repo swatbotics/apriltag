@@ -54,6 +54,8 @@ int main(int argc, char *argv[])
     getopt_add_bool(getopt, 'q', "quiet", 0, "Reduce output");
     getopt_add_string(getopt, 'f', "family", "tag36h11", "Tag family to use");
     getopt_add_int(getopt, '\0', "border", "1", "Set tag family border size");
+    getopt_add_int(getopt, 'i', "iters", "1", "Repeat processing on input set this many times");
+
     getopt_add_int(getopt, 't', "threads", "4", "Use this many CPU threads");
     getopt_add_double(getopt, 'x', "decimate", "1.0", "Decimate input image by this factor");
     getopt_add_double(getopt, 'b', "blur", "0.0", "Apply low-pass blur to input");
@@ -111,6 +113,8 @@ int main(int argc, char *argv[])
     int nogui = getopt_get_bool(getopt, "no-gui");
 
     int benchmark = getopt_get_bool(getopt, "benchmark");
+
+    int maxiters = getopt_get_int(getopt, "iters");
     
     if (benchmark) {
       nogui = 1;
@@ -121,109 +125,118 @@ int main(int argc, char *argv[])
 
     const int hamm_hist_max = 10;
 
-    for (int input = 0; input < zarray_size(inputs); input++) {
+    for (int iter = 0; iter < maxiters; iter++) {
 
-      int hamm_hist[hamm_hist_max];
-      memset(hamm_hist, 0, sizeof(hamm_hist));
-
-      char *path;
-      zarray_get(inputs, input, &path);
-
-      if (benchmark) {
-        int l=strlen(path);
-        while (l && path[l-1] != '/') { --l; }
-        printf("%s", path+l);
-      } else if (!quiet) {
-        printf("loading %s\n", path);
+      if (maxiters > 1 && !benchmark) {
+        printf("iter %d / %d\n", iter + 1, maxiters);
       }
 
-      cv::Mat orig = cv::imread(path);
-            
-      Mat8uc1 gray;
+      for (int input = 0; input < zarray_size(inputs); input++) {
 
-      if (orig.channels() == 3) {
-        cv::cvtColor(orig, gray, cv::COLOR_RGB2GRAY);
-      } else {
-        orig.copyTo(gray);
-      }
+        int hamm_hist[hamm_hist_max];
+        memset(hamm_hist, 0, sizeof(hamm_hist));
 
-      image_u8_t* im8 = cv2im8_copy(gray);
-
-      if (gray.empty()) {
-        fprintf(stderr, "error loading %s\n", path);
-        continue;
-      }
-
-      zarray_t *detections = apriltag_detector_detect(td, im8);
-      
-      cv::Mat display = cv::Mat::zeros(orig.size(), orig.type());
-      
-      total_detections += zarray_size(detections);
-
-      for (int i = 0; i < zarray_size(detections); i++) {
-        apriltag_detection_t *det;
-        zarray_get(detections, i, &det);
+        char *path;
+        zarray_get(inputs, input, &path);
 
         if (benchmark) {
-          printf(" %d", det->id);
+          int l=strlen(path);
+          while (l && path[l-1] != '/') { --l; }
+          printf("%s", path+l);
         } else if (!quiet) {
-          printf("detection %3d: id (%2dx%2d)-%-4d, hamming %d, "
-                 "goodness %8.3f, margin %8.3f\n",
-                 i, det->family->d*det->family->d, det->family->h,
-                 det->id, det->hamming, det->goodness, det->decision_margin);
+          printf("loading %s\n", path);
         }
 
-        hamm_hist[det->hamming]++;
-        
-        if (!nogui) {
-          cv::Mat dimg = detectionImage(det, orig.size(), orig.type());
-          display = cv::max(display, dimg);
+        cv::Mat orig = cv::imread(path);
+            
+        Mat8uc1 gray;
+
+        if (orig.channels() == 3) {
+          cv::cvtColor(orig, gray, cv::COLOR_RGB2GRAY);
+        } else {
+          orig.copyTo(gray);
         }
 
-      }
+        image_u8_t* im8 = cv2im8_copy(gray);
 
-      apriltag_detections_destroy(detections);
-
-      if (!benchmark) {
-
-        if (!quiet) {
-          timeprofile_display(td->tp);
-          printf("nedges: %d, nsegments: %d, nquads: %d\n",
-                 td->nedges, td->nsegments, td->nquads);
+        if (gray.empty()) {
+          fprintf(stderr, "error loading %s\n", path);
+          continue;
         }
 
-        if (!quiet)
-          printf("Hamming histogram: ");
-
-        for (int i = 0; i < hamm_hist_max; i++)
-          printf("%5d", hamm_hist[i]);
-
-        if (quiet) {
-          printf("%12.3f", timeprofile_total_utime(td->tp) / 1.0E3);
-        }
-        
-
-      }
+        zarray_t *detections = apriltag_detector_detect(td, im8);
       
-      printf("\n");
+        cv::Mat display = cv::Mat::zeros(orig.size(), orig.type());
+      
+        total_detections += zarray_size(detections);
 
-      if (!nogui) {
-        display = 0.5*display + 0.5*orig;
-        cv::imshow("foo", orig);
-        cv::waitKey();
-        cv::imshow("foo", display);
-        cv::waitKey();
+        for (int i = 0; i < zarray_size(detections); i++) {
+          apriltag_detection_t *det;
+          zarray_get(detections, i, &det);
+
+          if (benchmark) {
+            printf(" %d", det->id);
+          } else if (!quiet) {
+            printf("detection %3d: id (%2dx%2d)-%-4d, hamming %d, "
+                   "goodness %8.3f, margin %8.3f\n",
+                   i, det->family->d*det->family->d, det->family->h,
+                   det->id, det->hamming, det->goodness, det->decision_margin);
+          }
+
+          hamm_hist[det->hamming]++;
+        
+          if (!nogui) {
+            cv::Mat dimg = detectionImage(det, orig.size(), orig.type());
+            display = cv::max(display, dimg);
+          }
+
+        }
+
+        apriltag_detections_destroy(detections);
+
+        if (!benchmark) {
+
+          if (!quiet) {
+            timeprofile_display(td->tp);
+            printf("nedges: %d, nsegments: %d, nquads: %d\n",
+                   td->nedges, td->nsegments, td->nquads);
+          }
+
+          if (!quiet)
+            printf("Hamming histogram: ");
+
+          for (int i = 0; i < hamm_hist_max; i++)
+            printf("%5d", hamm_hist[i]);
+
+          if (quiet) {
+            printf("%12.3f", timeprofile_total_utime(td->tp) / 1.0E3);
+          }
+        
+
+        }
+      
+        printf("\n");
+
+        if (!nogui) {
+          display = 0.5*display + 0.5*orig;
+          cv::imshow("foo", orig);
+          cv::waitKey();
+          cv::imshow("foo", display);
+          cv::waitKey();
+        }
+
+        image_u8_destroy(im8);
+        total_time += timeprofile_total_utime(td->tp);
+
       }
-
-      image_u8_destroy(im8);
-      total_time += timeprofile_total_utime(td->tp);
 
     }
 
     if (benchmark) {
+      int nin = zarray_size(inputs)*maxiters;
       fprintf(stderr, "%d detections over %d images in %.3f ms (%.3f ms per frame)\n",
-              total_detections, zarray_size(inputs),
-              (total_time*1e-3), (total_time*1e-3)/zarray_size(inputs));
+              total_detections, nin,
+              (total_time*1e-3), (total_time*1e-3)/nin);
     }
 
     // don't deallocate contents of inputs; those are the argv
