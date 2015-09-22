@@ -12,6 +12,7 @@
 
   TODO:
 
+   - play with chunk size in box threshold?
    - parallelize finding contours 
 
   DONE: 
@@ -633,6 +634,7 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
   const contour_info_t* ctrs = (const contour_info_t*)contours->data;
 
   int chunksize = 1 + nc / (APRILTAG_TASKS_PER_THREAD_TARGET * td->nthreads);
+  //int chunksize = 1 + nc / td->nthreads;
 
   qfc_info_t qfcs[nc / chunksize + 1];
 
