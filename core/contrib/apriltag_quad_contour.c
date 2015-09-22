@@ -12,14 +12,14 @@
 
   TODO:
 
-   - parallelize processing contours 
+   - parallelize finding contours 
 
   DONE: 
 
    - april-style debug visualizations
    - parallelize integral images
    - parallelize box threshold
-   - parallelize finding contours (did not seem to help)
+   - parallelize processing contours (did not seem to help)
 
   NOPE:
 
