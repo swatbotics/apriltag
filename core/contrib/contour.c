@@ -903,15 +903,19 @@ typedef struct contour_node contour_node_t;
 
 struct contour_node {
   contour_point_t point;
-  size_t next_index;
+  size_t succ;
 };
 
-static inline contour_node_t* node_get(zarray_t* nodes, int idx) {
-  assert( idx < nodes->size );
-  return (contour_node_t*)nodes->data + idx;
+static const size_t npos = -1;
+
+static inline int node_valid(zarray_t* nodes, size_t x) {
+  return x < (size_t)nodes->size;
 }
 
-static const size_t npos = -1;
+static inline contour_node_t* node_get(zarray_t* nodes, int idx) {
+  assert( node_valid(nodes, idx) );
+  return (contour_node_t*)nodes->data + idx;
+}
 
 static inline size_t node_create(zarray_t* nodes, uint32_t x, uint32_t y, size_t nidx) {
 
@@ -922,24 +926,22 @@ static inline size_t node_create(zarray_t* nodes, uint32_t x, uint32_t y, size_t
   contour_node_t* n = node_get(nodes, idx);
   n->point.x = x;
   n->point.y = y;
-  n->next_index = nidx;
-  dprintf("    new point with index %d at (%d, %d) with successor index %d at pos (%d, %d)\n",
-         (int)idx, (int)x, (int)y, (int)nidx,
-         nidx < (size_t)nodes->size ? (int)node_get(nodes, nidx)->point.x : -1,
-         nidx < (size_t)nodes->size ? (int)node_get(nodes, nidx)->point.y : -1);
+  n->succ = nidx;
+  dprintf("    new point at (%d, %d) with successor at pos (%d, %d)\n",
+          (int)x, (int)y,
+          node_valid(nodes, nidx) ? (int)node_get(nodes, nidx)->point.x : -1,
+          node_valid(nodes, nidx) ? (int)node_get(nodes, nidx)->point.y : -1);
 
   return idx;
   
 }
 
 static inline void node_join(zarray_t* nodes, size_t p, size_t q) {
-  assert( q == npos || q < (size_t)nodes->size );
-  node_get(nodes, p)->next_index = q;
-  dprintf("    point with index %d at (%d, %d) now has successor with index %d at (%d, %d)\n",
-         (int)p,
+  assert( node_valid(nodes, q) );
+  node_get(nodes, p)->succ = q;
+  dprintf("    point at (%d, %d) now has successor at (%d, %d)\n",
          (int)node_get(nodes, p)->point.x, 
          (int)node_get(nodes, p)->point.y, 
-         (int)q,
          (int)node_get(nodes, q)->point.x, 
          (int)node_get(nodes, q)->point.y);
 }
@@ -964,9 +966,6 @@ static inline void new_contour(zarray_t* nodes, size_t** pciter,
             
 }
 
-static inline int node_valid(zarray_t* nodes, size_t x) {
-  return x < (size_t)nodes->size;
-}
 
 zarray_t* contour_line_sweep(const image_u8_t* im) {
 
@@ -987,7 +986,7 @@ zarray_t* contour_line_sweep(const image_u8_t* im) {
     size_t* citer = cur_edges;
 
     size_t* piter = prev_edges;
-    const size_t* pend = prev_edges + prev_count*2;
+    const size_t* pend = prev_edges + prev_count;
 
     const uint8_t* src = srcrow;
 
@@ -1065,7 +1064,7 @@ zarray_t* contour_line_sweep(const image_u8_t* im) {
                 dprintf("    modifying right hand of prev since x's equal\n");
                 citer[1] = piter[1];
                 pp1->point.y = y+1;
-                pp1->next_index = citer[0];
+                pp1->succ = citer[0];
                 
               } else {
 
@@ -1077,7 +1076,7 @@ zarray_t* contour_line_sweep(const image_u8_t* im) {
                 // due to creation immediately above this line
                 pp1 = node_get(nodes, piter[1]);
 
-                pp1->next_index = q;
+                pp1->succ = q;
 
                 if (c1 < pp1->point.x) {
                   
@@ -1102,7 +1101,7 @@ zarray_t* contour_line_sweep(const image_u8_t* im) {
       
     } // for each column
 
-    prev_count = (citer-cur_edges)/2;
+    prev_count = (citer-cur_edges);
     
     // swap prev and cur edges
     size_t* tmp = prev_edges;
@@ -1118,13 +1117,13 @@ zarray_t* contour_line_sweep(const image_u8_t* im) {
   
   for (int i=0; i<nodes->size; ++i) {
     contour_node_t* n = node_get(nodes, i);
-    if (node_valid(nodes, n->next_index)) {
+    if (node_valid(nodes, n->succ)) {
       zarray_t* contour = zarray_create(sizeof(contour_point_t));
       zarray_add(contours, &contour);
-      while (node_valid(nodes, n->next_index)) {
+      while (node_valid(nodes, n->succ)) {
         zarray_add(contour, &n->point);
-        contour_node_t* nn = node_get(nodes, n->next_index);
-        n->next_index = npos;
+        contour_node_t* nn = node_get(nodes, n->succ);
+        n->succ = npos;
         n = nn;
         ++ocount;
       }

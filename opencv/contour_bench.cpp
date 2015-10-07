@@ -9,10 +9,12 @@ int main(int argc, char** argv) {
 
 
   cv::Size size(800, 600);
-  cv::Size ssize(80, 60);
+  int scl = 10;
+  
+  cv::Size ssize(size.width/scl, size.height/scl);
   int t0 = 191;
   int bsz = 55;
-  int t1 = 20;
+  int t1 = 0;
 
   cv::RNG rng(1234567);
 
