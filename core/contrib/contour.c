@@ -4,6 +4,12 @@
 
 //#define DO_DEBUG
 
+#ifdef DO_DEBUG
+#define dprintf printf
+#else
+#define dprintf if (0) printf
+#endif
+
 /*
 #ifdef NDEBUG
 #undef NDEBUG
@@ -125,7 +131,7 @@ static inline int conn_scan_cw(const conn_info_t* c,
   int n = conn_lookup(c, i, j, i2, j2);
 
   assert(n >= 0 && n < NUM_NEIGHBORS);
-  assert(i < im->height && j < im->width);
+  assert(i < (uint32_t)im->height && j < (uint32_t)im->width);
 
   int offs = i*im->stride + j;
 
@@ -163,7 +169,7 @@ static inline int conn_scan_ccw(const conn_info_t* c,
   n = (n+1) & NEIGHBOR_MASK;
 
   assert(n >= 0 && n < NUM_NEIGHBORS);
-  assert(i3 < im->height && j3 < im->width);
+  assert(i3 < (uint32_t)im->height && j3 < (uint32_t)im->width);
 
   int offs = i3*im->stride + j3;
 
@@ -241,8 +247,8 @@ zarray_t* contour_detect(const image_u8_t* im8) {
   //memset(im->buf + (im->height-2)*im->stride, 0, sizeof(ccount_t)*im->width);
   //memset(im->buf + (im->height-1)*im->stride, 0, sizeof(ccount_t)*im->width);
 
-  for (uint32_t y=1; y<im->height-1; ++y) {
-    for (uint32_t x=1; x<im->width-1; ++x) {
+  for (uint32_t y=1; y<(uint32_t)(im->height-1); ++y) {
+    for (uint32_t x=1; x<(uint32_t)(im->width-1); ++x) {
       dst[x] = src[x] ? 1 : 0;
     }
     dst[0] = dst[1] = 0;
@@ -269,7 +275,7 @@ zarray_t* contour_detect(const image_u8_t* im8) {
   ccount_t* f_i = im->buf;
 
   // for each row
-  for (uint32_t i=0; i<im->height; ++i, f_i += im->stride) {
+  for (uint32_t i=0; i<(uint32_t)im->height; ++i, f_i += im->stride) {
 
     // reset LNBD at start of row
     int lnbd = 1;
@@ -279,7 +285,7 @@ zarray_t* contour_detect(const image_u8_t* im8) {
 #endif
 
     // for each column
-    for (uint32_t j=0; j<im->width; ++j) {
+    for (uint32_t j=0; j<(uint32_t)im->width; ++j) {
 
       // flag for border
       int is_border = 0;
@@ -890,5 +896,262 @@ void contour_test_outer() {
     printf("\n");
         
   }
+
+}
+
+typedef struct contour_node contour_node_t;
+
+struct contour_node {
+  contour_point_t point;
+  size_t next_index;
+};
+
+static inline contour_node_t* node_get(zarray_t* nodes, int idx) {
+  assert( idx < nodes->size );
+  return (contour_node_t*)nodes->data + idx;
+}
+
+static const size_t npos = -1;
+
+static inline size_t node_create(zarray_t* nodes, uint32_t x, uint32_t y, size_t nidx) {
+
+  size_t idx = nodes->size;
+  zarray_ensure_capacity(nodes, idx+1);
+  ++nodes->size;
+
+  contour_node_t* n = node_get(nodes, idx);
+  n->point.x = x;
+  n->point.y = y;
+  n->next_index = nidx;
+  dprintf("    new point with index %d at (%d, %d) with successor index %d at pos (%d, %d)\n",
+         (int)idx, (int)x, (int)y, (int)nidx,
+         nidx < (size_t)nodes->size ? (int)node_get(nodes, nidx)->point.x : -1,
+         nidx < (size_t)nodes->size ? (int)node_get(nodes, nidx)->point.y : -1);
+
+  return idx;
+  
+}
+
+static inline void node_join(zarray_t* nodes, size_t p, size_t q) {
+  assert( q == npos || q < (size_t)nodes->size );
+  node_get(nodes, p)->next_index = q;
+  dprintf("    point with index %d at (%d, %d) now has successor with index %d at (%d, %d)\n",
+         (int)p,
+         (int)node_get(nodes, p)->point.x, 
+         (int)node_get(nodes, p)->point.y, 
+         (int)q,
+         (int)node_get(nodes, q)->point.x, 
+         (int)node_get(nodes, q)->point.y);
+}
+
+
+static inline void new_contour(zarray_t* nodes, size_t** pciter,
+                               int y, int c0, int c1) {
+
+  // todo: deal
+  size_t d = node_create(nodes, c1, y+1, npos);
+  size_t c = node_create(nodes, c1, y+0, d);
+  size_t b = node_create(nodes, c0, y+0, c);
+  size_t a = node_create(nodes, c0, y+1, b);
+  node_join(nodes, d, a);
+
+  size_t* citer = *pciter;
+  citer[0] = a;
+  citer[1] = d;
+  *pciter += 2;
+
+  dprintf("  new contour for interval [%d,%d]\n", c0, c1);
+            
+}
+
+zarray_t* contour_line_sweep(const image_u8_t* im) {
+
+  zarray_t* nodes = zarray_create(sizeof(contour_node_t));
+  zarray_t* contours = zarray_create(sizeof(zarray_t*));
+
+  size_t* prev_edges = malloc(sizeof(size_t)*(im->width+1));
+  size_t prev_count = 0;
+
+  size_t* cur_edges = malloc(sizeof(size_t)*(im->width+1));
+
+  const uint8_t* srcrow = im->buf;
+  
+  for (uint32_t y=0; y<(uint32_t)im->height; ++y) {
+
+    dprintf("processing y=%d\n", y);
+
+    size_t* citer = cur_edges;
+
+    size_t* piter = prev_edges;
+    const size_t* pend = prev_edges + prev_count*2;
+
+    const uint8_t* src = srcrow;
+
+    int s0 = (*src++ != 0);
+    uint32_t c0 = 0;
+
+    for (uint32_t c1=1; c1<=(uint32_t)im->width; ++c1) {
+
+      int s1 = c1 < (uint32_t)im->width && (*src++ != 0);
+
+      if (s1 != s0) {
+    
+        if (!s1) { // transitioned from on to off
+
+          dprintf("current interval is x=[%d,%d]\n", c0, c1);
+
+          while (piter != pend && node_get(nodes, piter[1])->point.x <= c0) {
+            piter += 2;
+          }
+
+          if (piter == pend) {
+
+            dprintf("  starting new contour since piter == pend\n");
+            new_contour(nodes, &citer, y, c0, c1);
+
+          } else {
+
+            assert(piter < pend);
+            
+            dprintf("  prev interval is x=[%d,%d]\n",
+                    (int)node_get(nodes, piter[0])->point.x,
+                    (int)node_get(nodes, piter[1])->point.x);
+            
+            assert(c0 < node_get(nodes, piter[1])->point.x);
+            
+            if (c1 <= node_get(nodes, piter[0])->point.x) {
+
+              dprintf("  starting new contour since c1 <= p0\n");
+              new_contour(nodes, &citer, y, c0, c1);
+              
+            } else {
+
+              { // set up scope for pp0
+
+                contour_node_t* pp0 = node_get(nodes, piter[0]);
+
+                dprintf("  joining left...\n");
+                // join left
+                if (pp0->point.x == c0) {
+                  // just modify existing thing
+                  citer[0] = piter[0];
+                  pp0->point.y = y+1;
+                  dprintf("    modifying left hand of prev since x's equal\n");
+                } else {
+                  size_t q = node_create(nodes, c0, y, piter[0]);
+                  citer[0] = node_create(nodes, c0, y+1, q);
+                }
+
+              } // no need to refer to pp0 after this point
+
+              // join interior
+              while (piter + 2 != pend &&
+                     node_get(nodes, piter[2])->point.x < c1) {
+                dprintf("  joining interior...\n");
+                node_join(nodes, piter[1], piter[2]);
+                piter += 2;
+              }
+
+              contour_node_t* pp1 = node_get(nodes, piter[1]);
+
+              // join right
+              dprintf("  joining right...\n");
+              if (pp1->point.x == c1) {
+                
+                dprintf("    modifying right hand of prev since x's equal\n");
+                citer[1] = piter[1];
+                pp1->point.y = y+1;
+                pp1->next_index = citer[0];
+                
+              } else {
+
+                citer[1] = node_create(nodes, c1, y+1, citer[0]);
+
+                size_t q = node_create(nodes, c1, y,   citer[1]);
+
+                // must re-get pointer because it may have been invalidated
+                // due to creation immediately above this line
+                pp1 = node_get(nodes, piter[1]);
+
+                pp1->next_index = q;
+
+                if (c1 < pp1->point.x) {
+                  
+                  dprintf("    updating prev edge because c1 < p1\n");
+                  piter[0] = q;
+                  
+                }
+                
+              }
+
+              citer += 2;
+              
+            } // c1 < p0
+          } // prev interval exists
+        } // transition to off state or end of row
+
+        // update state
+        c0 = c1;
+        s0 = s1;
+        
+      } // if state transition
+      
+    } // for each column
+
+
+    prev_count = (citer-cur_edges)/2;
+    
+    // swap prev and cur edges
+    size_t* tmp = prev_edges;
+    prev_edges = cur_edges;
+    cur_edges = tmp;
+
+    // move to next row
+    srcrow += im->stride;
+    
+  }
+
+  size_t ncount = nodes->size;
+  int ocount = 0;
+  
+  for (int i=0; i<nodes->size; ++i) {
+    contour_node_t* n = node_get(nodes, i);
+    if (n->next_index < ncount) {
+      zarray_t* contour = zarray_create(sizeof(contour_point_t));
+      zarray_add(contours, &contour);
+      while (n->next_index < ncount) {
+        zarray_add(contour, &n->point);
+        contour_node_t* nn = node_get(nodes, n->next_index);
+        n->next_index = npos;
+        n = nn;
+        ++ocount;
+      }
+    }
+  }
+
+  dprintf("ocount=%d, nodes->size=%d\n", ocount, nodes->size);
+
+  if (ocount != nodes->size) {
+    fprintf(stderr, "that was odd!\n");
+    exit(1);
+  }
+
+  free(prev_edges);
+  free(cur_edges);
+  zarray_destroy(nodes);
+  return contours;
+
+}
+
+
+void contour_line_sweep_destroy(zarray_t* contours) {
+
+  for (int i=0; i<zarray_size(contours); ++i) {
+    zarray_t* contour;
+    zarray_get(contours, i, &contour);
+    free(contour);          
+  }
+    
+  zarray_destroy(contours);
 
 }

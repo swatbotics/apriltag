@@ -8,6 +8,7 @@ if(THREADS_HAVE_PTHREAD_ARG)
 endif()
 
 add_compile_options("-Wall")
+add_compile_options("-Wsign-compare")
 add_compile_options("-g")
 add_compile_options("-march=native")
 

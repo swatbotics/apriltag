@@ -339,7 +339,7 @@ double sample_gradient_xyw(const image_u8_t* im,
     const contour_point_t* p;
     zarray_get_volatile(points, i, &p);
 
-    if (p->x && p->y && p->x + 1 < im->width && p->y + 1 < im->height) {
+    if (p->x && p->y && p->x + 1 < (uint32_t)im->width && p->y + 1 < (uint32_t)im->height) {
 
       int offs = p->x + im->stride*p->y;
     

@@ -5,7 +5,7 @@ set(sources
   common/image_u8.c common/pnm.c common/image_f32.c common/image_u32.c 
   common/workerpool.c common/time_util.c common/svd22.c 
   common/homography.c common/string_util.c common/getopt.c
-  contrib/box.c contrib/contour.c contrib/lm.c
+  contrib/box.c contrib/contour.c contrib/lm.c contrib/pdfutil.c
   contrib/apriltag_quad_contour.c)
 
 include_directories(common contrib .)
@@ -20,4 +20,7 @@ target_link_libraries(contour_test apriltag ${CMAKE_THREAD_LIBS_INIT} m)
 
 add_executable(lm_test contrib/lm_test.cpp)
 target_link_libraries(lm_test apriltag ${CMAKE_THREAD_LIBS_INIT} m)
+
+add_executable(pdf_test contrib/pdf_test.cpp)
+target_link_libraries(pdf_test apriltag ${CMAKE_THREAD_LIBS_INIT} m)
 

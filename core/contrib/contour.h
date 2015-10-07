@@ -36,6 +36,11 @@ zarray_t* contour_outer_boundary(const contour_info_t* c,
                                  int start,
                                  int count);
 
+// returns zarray_t of zarray_t of contour_point
+zarray_t* contour_line_sweep(const image_u8_t* im);
+
+void contour_line_sweep_destroy(zarray_t* contours);
+
 #ifdef __cplusplus
 }
 #endif
