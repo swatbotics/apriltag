@@ -14,12 +14,12 @@ int main(int argc, char** argv) {
   int bsz = 55;
   int t1 = 20;
 
-  cv::RNG& rng = cv::theRNG();
+  cv::RNG rng(1234567);
 
   uint64_t total0 = 0;
   uint64_t total1 = 0;
 
-  const int maxiter = 1000;
+  const int maxiter = 100;
 
   for (int iter=0; iter<maxiter; ++iter) {
 

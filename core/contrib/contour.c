@@ -964,6 +964,10 @@ static inline void new_contour(zarray_t* nodes, size_t** pciter,
             
 }
 
+static inline int node_valid(zarray_t* nodes, size_t x) {
+  return x < (size_t)nodes->size;
+}
+
 zarray_t* contour_line_sweep(const image_u8_t* im) {
 
   zarray_t* nodes = zarray_create(sizeof(contour_node_t));
@@ -1098,7 +1102,6 @@ zarray_t* contour_line_sweep(const image_u8_t* im) {
       
     } // for each column
 
-
     prev_count = (citer-cur_edges)/2;
     
     // swap prev and cur edges
@@ -1111,15 +1114,14 @@ zarray_t* contour_line_sweep(const image_u8_t* im) {
     
   }
 
-  size_t ncount = nodes->size;
   int ocount = 0;
   
   for (int i=0; i<nodes->size; ++i) {
     contour_node_t* n = node_get(nodes, i);
-    if (n->next_index < ncount) {
+    if (node_valid(nodes, n->next_index)) {
       zarray_t* contour = zarray_create(sizeof(contour_point_t));
       zarray_add(contours, &contour);
-      while (n->next_index < ncount) {
+      while (node_valid(nodes, n->next_index)) {
         zarray_add(contour, &n->point);
         contour_node_t* nn = node_get(nodes, n->next_index);
         n->next_index = npos;
