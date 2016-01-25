@@ -11,6 +11,7 @@ add_compile_options("-Wall")
 add_compile_options("-Wsign-compare")
 add_compile_options("-g")
 add_compile_options("-march=native")
+add_compile_options("-pthread")
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -std=c99")

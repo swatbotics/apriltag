@@ -643,6 +643,8 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
   int results[nc];
   const contour_info_t* ctrs = (const contour_info_t*)contours->data;
 
+#if 1
+
   int chunksize = 1 + nc / (APRILTAG_TASKS_PER_THREAD_TARGET * td->nthreads);
   //int chunksize = 1 + nc / td->nthreads;
 
@@ -662,6 +664,19 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
   }
 
   workerpool_run(td->wp);
+
+#else
+
+  qfc_info_t p;
+  p.td = td;
+  p.im = im;
+  p.contours = ctrs;
+  p.quads = wquads;
+  p.results = results;
+  p.count = nc;
+  qfc_task(&p);
+
+#endif
   
   for (int c=0; c<nc; ++c) {
     
@@ -717,7 +732,7 @@ zarray_t* apriltag_quad_contour(apriltag_detector_t* td,
   timeprofile_stamp(td->tp, "threshold");
 
   /* Step 2: contour detection */
-  zarray_t* contours = contour_detect(thresh);
+  zarray_t* contours = contour_detect(thresh); 
   timeprofile_stamp(td->tp, "contour");
 
   if (td->debug) {
