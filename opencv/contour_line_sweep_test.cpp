@@ -132,8 +132,10 @@ int main(int argc, char** argv) {
 
       cv::Point offset(scl, scl);
 
-      cv::fillPoly(display, &cv_ptrs[0], &cv_npts[0], cv_ptrs.size(),
-                   CV_RGB(255,255,255), 4, 0, offset);
+      if (cv_ptrs.size()) {
+        cv::fillPoly(display, &cv_ptrs[0], &cv_npts[0], cv_ptrs.size(),
+                     CV_RGB(255,255,255), 4, 0, offset);
+      }
 
       for (size_t i=0; i<cv_contours.size(); ++i) {
         for (size_t j=0; j<cv_contours[i].size(); ++j) {

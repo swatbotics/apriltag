@@ -9,10 +9,10 @@ int main(int argc, char** argv) {
 
 
   cv::Size size(800, 600);
-  int scl = 10;
+  int scl = 20;
   
   cv::Size ssize(size.width/scl, size.height/scl);
-  int t0 = 191;
+  int t0 = 220;
   int bsz = 55;
   int t1 = 0;
 
@@ -43,8 +43,7 @@ int main(int argc, char** argv) {
     lblur.row(0) = 0;
     lblur.row(size.height-1) = 0;
 
-    //cv::imshow("win", lblur);
-    //cv::waitKey();
+    //cv::imshow("win", lblur); cv::waitKey();
 
     image_u8_t im8 = cv2im8(lblur);
 

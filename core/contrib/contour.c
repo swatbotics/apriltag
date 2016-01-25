@@ -966,6 +966,99 @@ static inline void new_contour(zarray_t* nodes, size_t** pciter,
             
 }
 
+static inline int find_next_zero(const uint8_t* buf, int len) {
+  return strnlen((const char*)buf, len);
+}
+
+#define find_next_nonzero find_next_nonzero_word
+
+static inline int find_next_nonzero_simple(const uint8_t* buf, int len) {
+
+    for (int i=0; i<len; ++i) {
+      if (buf[i]) { return i; }
+    }
+    return len;
+
+}
+
+/*
+static inline int nz64(uint64_t k) {
+  return __builtin_ctzll(k)/8;
+}
+*/
+
+static inline int nz64(uint64_t k) {
+
+  int s = !(k & 0xFFFFFFFF) * 32;
+  s |= !((k >> s) & 0xFFFF) * 16;
+  s |= !((k >> s) & 0xFF) * 8;
+
+  return s/8;  
+  
+}
+
+/*
+
+#if (defined(__clang__) || defined(__gcc__)) && defined(__LITTLE_ENDIAN__)
+        int w = __builtin_ctzll(k) / 8; // for little-endian
+#elif (defined(__clang__) || defined(__gcc__)) && defined(__BIG_ENDIAN__)
+        int w = __builtin_clzll(k) / 8; // for big-endian
+#else
+        int w = ( buf[0] ? 0 :
+                  buf[1] ? 1 :
+                  buf[2] ? 2 :
+                  buf[3] ? 3 :
+                  buf[4] ? 4 :
+                  buf[5] ? 5 :
+                  buf[6] ? 6 : 7 );
+#endif
+
+
+
+        return offs + w;
+*/
+
+
+static inline int find_next_nonzero_word(const uint8_t* buf, int len) {
+
+  int offs = 0;
+    
+  if (len >= 16) {
+    
+    {
+      int r = (size_t)buf % 8;
+      offs = (8 - r) % 8;
+      for (int i=0; i<offs; ++i) {
+        if (buf[i]) { return i; }
+      }
+      buf += offs;
+      len -= offs;
+    }
+
+    assert((size_t)buf % 8 == 0);
+
+    int n8 = len / 8;
+    for (int j=0; j<n8; ++j) {
+      uint64_t k;
+      memcpy(&k, buf, 8);
+      if (k) {
+        return offs + nz64(k);
+      }
+      buf += 8;
+      offs += 8;
+    }
+
+    len -= n8 * 8;
+
+  }
+  
+  for (int i=0; i<len; ++i) {
+    if (buf[i]) { return offs+i; }
+  }
+  
+  return offs+len;
+  
+}
 
 zarray_t* contour_line_sweep(const image_u8_t* im) {
 
@@ -989,115 +1082,123 @@ zarray_t* contour_line_sweep(const image_u8_t* im) {
     const size_t* pend = prev_edges + prev_count;
 
     const uint8_t* src = srcrow;
+    uint32_t c1 = 0;
+    int remaining = im->width;
 
-    int s0 = (*src++ != 0);
-    uint32_t c0 = 0;
+    while (remaining) {
 
-    for (uint32_t c1=1; c1<=(uint32_t)im->width; ++c1) {
+      int cnt = find_next_nonzero(src, remaining);
+#if 0
+      int cnt2 = find_next_nonzero_simple(src, remaining);
+      if (cnt != cnt2) {
+        fprintf(stderr,"error! cnt=%d, cnt2=%d\n", cnt, cnt2);
+        exit(1);
+      }
+#endif
+      
+      if (cnt == remaining) {
+        break;
+      }
 
-      int s1 = c1 < (uint32_t)im->width && (*src++ != 0);
+      src += cnt;
+      uint32_t c0 = c1 + cnt;
+      remaining -= cnt;
 
-      if (s1 != s0) {
-    
-        if (!s1) { // transitioned from on to off
+      cnt = find_next_zero(src, remaining);
+      src += cnt;
+      c1 = c0 + cnt;
+      remaining -= cnt;
 
-          dprintf("current interval is x=[%d,%d]\n", c0, c1);
+      dprintf("current interval is x=[%d,%d]\n", c0, c1);
 
-          while (piter != pend && node_get(nodes, piter[1])->point.x <= c0) {
+      while (piter != pend && node_get(nodes, piter[1])->point.x <= c0) {
+        piter += 2;
+      }
+
+      if (piter == pend) {
+
+        dprintf("  starting new contour since piter == pend\n");
+        new_contour(nodes, &citer, y, c0, c1);
+
+      } else {
+
+        assert(piter < pend);
+            
+        dprintf("  prev interval is x=[%d,%d]\n",
+                (int)node_get(nodes, piter[0])->point.x,
+                (int)node_get(nodes, piter[1])->point.x);
+            
+        assert(c0 < node_get(nodes, piter[1])->point.x);
+            
+        if (c1 <= node_get(nodes, piter[0])->point.x) {
+
+          dprintf("  starting new contour since c1 <= p0\n");
+          new_contour(nodes, &citer, y, c0, c1);
+              
+        } else {
+
+          { // set up scope for pp0
+
+            contour_node_t* pp0 = node_get(nodes, piter[0]);
+
+            dprintf("  joining left...\n");
+            // join left
+            if (pp0->point.x == c0) {
+              // just modify existing thing
+              citer[0] = piter[0];
+              pp0->point.y = y+1;
+              dprintf("    modifying left hand of prev since x's equal\n");
+            } else {
+              size_t q = node_create(nodes, c0, y, piter[0]);
+              citer[0] = node_create(nodes, c0, y+1, q);
+            }
+
+          } // no need to refer to pp0 after this point
+
+          // join interior
+          while (piter + 2 != pend &&
+                 node_get(nodes, piter[2])->point.x < c1) {
+            dprintf("  joining interior...\n");
+            node_join(nodes, piter[1], piter[2]);
             piter += 2;
           }
 
-          if (piter == pend) {
+          contour_node_t* pp1 = node_get(nodes, piter[1]);
 
-            dprintf("  starting new contour since piter == pend\n");
-            new_contour(nodes, &citer, y, c0, c1);
-
+          // join right
+          dprintf("  joining right...\n");
+          if (pp1->point.x == c1) {
+                
+            dprintf("    modifying right hand of prev since x's equal\n");
+            citer[1] = piter[1];
+            pp1->point.y = y+1;
+            pp1->succ = citer[0];
+                
           } else {
 
-            assert(piter < pend);
-            
-            dprintf("  prev interval is x=[%d,%d]\n",
-                    (int)node_get(nodes, piter[0])->point.x,
-                    (int)node_get(nodes, piter[1])->point.x);
-            
-            assert(c0 < node_get(nodes, piter[1])->point.x);
-            
-            if (c1 <= node_get(nodes, piter[0])->point.x) {
+            citer[1] = node_create(nodes, c1, y+1, citer[0]);
 
-              dprintf("  starting new contour since c1 <= p0\n");
-              new_contour(nodes, &citer, y, c0, c1);
-              
-            } else {
+            size_t q = node_create(nodes, c1, y,   citer[1]);
 
-              { // set up scope for pp0
+            // must re-get pointer because it may have been invalidated
+            // due to creation immediately above this line
+            pp1 = node_get(nodes, piter[1]);
 
-                contour_node_t* pp0 = node_get(nodes, piter[0]);
+            pp1->succ = q;
 
-                dprintf("  joining left...\n");
-                // join left
-                if (pp0->point.x == c0) {
-                  // just modify existing thing
-                  citer[0] = piter[0];
-                  pp0->point.y = y+1;
-                  dprintf("    modifying left hand of prev since x's equal\n");
-                } else {
-                  size_t q = node_create(nodes, c0, y, piter[0]);
-                  citer[0] = node_create(nodes, c0, y+1, q);
-                }
-
-              } // no need to refer to pp0 after this point
-
-              // join interior
-              while (piter + 2 != pend &&
-                     node_get(nodes, piter[2])->point.x < c1) {
-                dprintf("  joining interior...\n");
-                node_join(nodes, piter[1], piter[2]);
-                piter += 2;
-              }
-
-              contour_node_t* pp1 = node_get(nodes, piter[1]);
-
-              // join right
-              dprintf("  joining right...\n");
-              if (pp1->point.x == c1) {
-                
-                dprintf("    modifying right hand of prev since x's equal\n");
-                citer[1] = piter[1];
-                pp1->point.y = y+1;
-                pp1->succ = citer[0];
-                
-              } else {
-
-                citer[1] = node_create(nodes, c1, y+1, citer[0]);
-
-                size_t q = node_create(nodes, c1, y,   citer[1]);
-
-                // must re-get pointer because it may have been invalidated
-                // due to creation immediately above this line
-                pp1 = node_get(nodes, piter[1]);
-
-                pp1->succ = q;
-
-                if (c1 < pp1->point.x) {
+            if (c1 < pp1->point.x) {
                   
-                  dprintf("    updating prev edge because c1 < p1\n");
-                  piter[0] = q;
+              dprintf("    updating prev edge because c1 < p1\n");
+              piter[0] = q;
                   
-                }
+            }
                 
-              }
+          }
 
-              citer += 2;
+          citer += 2;
               
-            } // c1 < p0
-          } // prev interval exists
-        } // transition to off state or end of row
-
-        // update state
-        c0 = c1;
-        s0 = s1;
-        
-      } // if state transition
+        } // c1 < p0
+      } // prev interval exists
       
     } // for each column
 

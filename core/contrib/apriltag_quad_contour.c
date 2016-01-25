@@ -490,21 +490,27 @@ static inline int lines_from_corners_contour(const apriltag_detector_t* td,
 
 }
 
+/* The workhorse of the quad detection: takes an individual contour and
+   tries to extract a quad from it, with various types of rejection. */
 static inline int quad_from_contour(const apriltag_detector_t* td,
                                     const image_u8_t* im,
                                     const contour_info_t* ci,
                                     struct quad* q) {
 
-  
+
+  /* Look at perimiter and area */
   const int min_perimeter = 4*td->qcp.min_side_length;
   const float min_area = td->qcp.min_side_length * td->qcp.min_side_length;
 
+  /* Eliminate really tiny contours: if each side of the contour is 1
+     pixel, we can lower-bound perimiter */
   int n = zarray_size(ci->points);
 
   if (!ci->is_outer || n < min_perimeter) {
     return -1;
   }
 
+  /* Compute area and centroid. */
   float ctr[2];
   float area = fabs(contour_area_centroid(ci->points, ctr));
 
@@ -602,6 +608,7 @@ typedef struct qfc_info {
   int count;
 } qfc_info_t;
 
+/* Simple wrapper on quad_from_contour */
 static void qfc_task(void* p) {
 
   qfc_info_t* qfc = (qfc_info_t*)p;
@@ -628,6 +635,9 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
 
   int nc = zarray_size(contours);
 
+  /* Step 3: divide list of contours into a worker pool, and tell
+     workers to run the qfc_task, which is just a simple wrapper on
+     quad_from_contour. */
 
   struct quad wquads[nc];
   int results[nc];
@@ -662,7 +672,7 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
     if (td->debug && results[c] >= 0) {
       uint32_t colors[8] = {
         MAKE_RGB(255,   0, 255), // success = mid purple
-        MAKE_RGB(127,   0,   0), // area = dark red
+        MAKE_RGB(127,   0,   0), // min. area = dark red
         MAKE_RGB(127,  63,   0), // diag. aspect = dark orange
         MAKE_RGB(127, 127,   0), // side aspect = dark yellow
         MAKE_RGB(  0, 127,   0), // too messy = dark green
@@ -684,6 +694,7 @@ zarray_t* quads_from_contours(const apriltag_detector_t* td,
 }
 
 
+/* Main function added by Matt. */
 zarray_t* apriltag_quad_contour(apriltag_detector_t* td,
                                 image_u8_t* im) {
 
@@ -693,6 +704,7 @@ zarray_t* apriltag_quad_contour(apriltag_detector_t* td,
     exit(1);
   }
 
+  /* Step 1: box blur & threshold (adaptive threshold) */
   image_u8_t* thresh = box_threshold_mt(im, 255, 1,
                                         td->qcp.threshold_neighborhood_size,
                                         td->qcp.threshold_value,
@@ -704,6 +716,7 @@ zarray_t* apriltag_quad_contour(apriltag_detector_t* td,
 
   timeprofile_stamp(td->tp, "threshold");
 
+  /* Step 2: contour detection */
   zarray_t* contours = contour_detect(thresh);
   timeprofile_stamp(td->tp, "contour");
 
@@ -721,6 +734,7 @@ zarray_t* apriltag_quad_contour(apriltag_detector_t* td,
     image_u32_destroy(display);
   }
 
+  /* Steps 3-N: extract quads from contours (see above). */
   zarray_t* quads = quads_from_contours(td, im, contours);
   timeprofile_stamp(td->tp, "quads from contours");
 
