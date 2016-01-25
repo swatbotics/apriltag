@@ -1,8 +1,7 @@
 #include "contour.h"
 #include <stdio.h>
 #include <vector>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/highgui.hpp>
+#include <opencv2/opencv.hpp>
 
 typedef struct string_image {
   int rows; 

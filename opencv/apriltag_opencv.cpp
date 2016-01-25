@@ -170,7 +170,7 @@ void arrow(cv::Mat image,
            int u) {
 
   cv::Point2f d10 = p1-p0;
-  d10 /= sqrt(d10.x*d10.x + d10.y*d10.y);
+  d10 *= 1.0 / sqrt(d10.x*d10.x + d10.y*d10.y);
 
   cv::Point2f n(d10.y, -d10.x);
 

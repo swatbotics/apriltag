@@ -32,6 +32,7 @@ either expressed or implied, of the FreeBSD Project.
 // limitation: image size must be <32768 in width and height. This is
 // because we use a fixed-point 16 bit integer representation with one
 // fractional bit.
+#define _GNU_SOURCE // for M_PI
 #include <math.h>
 #include <string.h>
 #include <stdio.h>

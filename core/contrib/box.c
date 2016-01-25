@@ -1,12 +1,31 @@
 #include "box.h"
 #include "image_u32.h"
 #include <alloca.h>
+
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include <stdio.h>
 #include <pthread.h>
 #include <math.h>
+
+#ifdef __linux
+#include <malloc.h>
+
+int my_memalign(void** pptr, size_t alignment, size_t size) {
+  *pptr = memalign(alignment, size);
+  int fail = (!*pptr);
+  return fail;
+}
+
+#else
+
+#define my_memalign posix_memalign
+
+#endif
+
+
+
 
 /*
 #ifdef NDEBUG
@@ -35,11 +54,13 @@ image_u8_t* image_u8_aligned64(int width, int height) {
   void* vptr = 0;
 
   size_t size = height * stride * sizeof(uint8_t);
-  int status = posix_memalign(&vptr, 64, size);
+
+  int status = my_memalign(&vptr, 64, size);
   
   if (status != 0 || !vptr) {
     return NULL;
   }
+
 
   image_u8_t tmp = {
     .width = width,
@@ -50,7 +71,7 @@ image_u8_t* image_u8_aligned64(int width, int height) {
 
   image_u8_t* img = (image_u8_t*)malloc(sizeof(image_u8_t));
 
-  *img = tmp;
+  memcpy(img, &tmp, sizeof(tmp));
 
   return img;
   
@@ -69,7 +90,7 @@ image_u32_t* image_u32_aligned64(int width, int height) {
   void* vptr = 0;
 
   size_t size = height * stride * sizeof(uint32_t);
-  int status = posix_memalign(&vptr, 64, size);
+  int status = my_memalign(&vptr, 64, size);
   
   if (status != 0 || !vptr) {
     return NULL;

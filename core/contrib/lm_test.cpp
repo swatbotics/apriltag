@@ -2,6 +2,7 @@
 #include "lm.h"
 #include <math.h>
 #include <assert.h>
+#include <stdlib.h>
 
 inline void get_line_dist(const double p1p2[4], // (x1, y1, x2, y2)
                           const double p[], int npts, int pstride,
