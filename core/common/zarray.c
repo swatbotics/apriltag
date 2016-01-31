@@ -59,3 +59,13 @@ void zarray_vmap(zarray_t *za, void (*f)())
         f(p);
     }
 }
+
+void zarray_get(const zarray_t *za, int idx, void *p)
+{
+    assert(za != NULL);
+    assert(p != NULL);
+    assert(idx >= 0);
+    assert(idx < za->size);
+
+    memcpy(p, &za->data[idx*za->el_sz], za->el_sz);
+}

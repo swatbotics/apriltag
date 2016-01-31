@@ -1,0 +1,23 @@
+In the cmakelists I added "SHARED" to the library creation. It's no longer a static library, 
+now it's a shared library. This occurs in line 13:
+ `add_library(apriltag ${sources})` -> `add_library(apriltag SHARED ${sources})`
+
+I moved the zarray_get function definition from zarray.h to zarray.c (declaration remains in zarray.h).
+This allows me to access this function from the shared library. 
+
+Using two classes for the python implementation.
+1) pytag_detector
+2) pytag_info
+The pytag_detector initializes all of the c functions in the constructor, it can load .pnm files, 
+and it can process those images. The return value is a pytag_info object. This object contains
+all of the relevant tag info stored in a list of dictionaries. It also contains a representation
+of the picture. The info can be printed, accessed from the class variables, or displayed visually.
+
+Questions:
+How do the tag families work? Should I load all of them, or does it need to be selective? How are they
+commonly used?
+
+Todo:
+Finish mat_d and get homography
+Test on abnormal images
+Try and get it working through opencv. Want to load a png or numpy image.

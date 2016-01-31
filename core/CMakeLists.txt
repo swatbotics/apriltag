@@ -10,7 +10,7 @@ set(sources
 
 include_directories(common contrib .)
 
-add_library(apriltag ${sources})
+add_library(apriltag SHARED ${sources})
 
 add_executable(apriltag_demo apriltag_demo.c)
 target_link_libraries(apriltag_demo apriltag ${CMAKE_THREAD_LIBS_INIT} m)
