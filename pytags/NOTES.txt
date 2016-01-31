@@ -13,11 +13,9 @@ and it can process those images. The return value is a pytag_info object. This o
 all of the relevant tag info stored in a list of dictionaries. It also contains a representation
 of the picture. The info can be printed, accessed from the class variables, or displayed visually.
 
-Questions:
-How do the tag families work? Should I load all of them, or does it need to be selective? How are they
-commonly used?
+////////////////////////////////////////////////////////////////////////////////////////
 
-Todo:
-Finish mat_d and get homography
-Test on abnormal images
-Try and get it working through opencv. Want to load a png or numpy image.
+Questions:
+How do the tag families work? Should I load all of them, or does it need to be selective? How are they commonly used and which ones are most normal?
+
+Thoughts on loading a non pnm image? It's awful... So there's that.

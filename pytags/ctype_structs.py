@@ -7,7 +7,7 @@ class image_u8(Structure):
   _fields_ = [("width", c_int),
               ("height", c_int),
               ("stride", c_int),
-              ("buf", c_int)]
+              ("buf", POINTER(c_int))]
 
 
 class apriltag_family(Structure):

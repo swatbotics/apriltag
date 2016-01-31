@@ -5,12 +5,10 @@ import numpy as np
 
 libc = CDLL('./../build/lib/libapriltag.so')
 
-
-
 class pytag_info:
   def __init__(self):
     self.data = []
-    self.img = './sample_pic3.pnm'
+    self.img = None
   
   def print_info(self):
     for i, datum in enumerate(self.data):
@@ -20,7 +18,9 @@ class pytag_info:
       print 'Center:', datum['center']
       print 'Hamming:', datum['hamming']
       print 'Goodness:', datum['goodness']
+      print 'Homography:\n', datum['homog']
       print 'Corners:', datum['corners'], '\n'
+
     print len(self.data), "tags found"
 
   def show_tags(self):
@@ -49,6 +49,7 @@ class pytags_detector:
     
     self.tag_detector = libc.apriltag_detector_create()
     self.img = None
+    self.img_file = None
 
 
   def add_tag_family(self):
@@ -57,11 +58,9 @@ class pytags_detector:
     tag_family = libc.tag36h11_create()
     libc.apriltag_detector_add_family(self.tag_detector, tag_family)
 
-  def load_image(self, filename):
+  def load_pnm_image(self, filename):
+    self.img_file = filename
     self.img = libc.image_u8_create_from_pnm(filename)
-
-  def use_numpy_image(self, img):
-    self.img = np.ctypes(img)
 
   def process(self):
     #detect apriltags in the image
@@ -80,7 +79,7 @@ class pytags_detector:
       new_info['hamming'] = tag.hamming #somethin'
       new_info['goodness'] = tag.goodness #somethin'
       new_info['decision_margin'] = tag.decision_margin #somethin'
-      new_info['homog'] = tag.H #TODO// This is the pointer to the matd_t.
+      new_info['homog'] = np.array(tag.H.contents.data)
       new_info['center'] = (int(tag.c[0]), int(tag.c[1])) #Center of the tag (tuple)
       new_info['corners'] = [(int(tag.p[0][0]), int(tag.p[0][1])), #Corners of the tag
                              (int(tag.p[1][0]), int(tag.p[1][1])),
@@ -88,6 +87,7 @@ class pytags_detector:
                              (int(tag.p[3][0]), int(tag.p[3][1]))]
       #Append this dict to the tag data array
       tag_info.data.append(new_info)
+      tag_info.img = self.img_file
 
     return tag_info
 
@@ -96,40 +96,8 @@ class pytags_detector:
 
 if __name__ == '__main__':
   detector = pytags_detector()
-  detector.load_image("./sample_pic3.pnm")
+  detector.load_pnm_image("./sample_pic.pnm")
   detector.add_tag_family() #Do we want this to be variable? Easy to do.
   tag_info = detector.process()
   tag_info.print_info()
   tag_info.show_tags()
-
-
-  '''
-  #Declare some return types 
-  #Declare return types
-  libc.apriltag_detector_create.restype = POINTER(cts.apriltag_detector)
-  libc.tag36h11_create.restype = POINTER(cts.apriltag_family)
-  libc.apriltag_detector_detect.restype = POINTER(cts.zarray_det)
-  libc.image_u8_create_from_pnm.restype = POINTER(cts.image_u8)
-
-  td = libc.apriltag_detector_create()
-  tf = libc.tag36h11_create()
-
-  libc.apriltag_detector_add_family(td, tf)
-  libc.apriltag_detector_add_family(td, tf2)
-  img = libc.image_u8_create_from_pnm("./sample_pic3.pnm")
-
-  detection = libc.apriltag_detector_detect(td, img)
-  #libc.refine_edges("nothin")
-  print "detected"
-
-
-  for i in range(0, detection.contents.size):
-    det = POINTER(cts.apriltag_detection)()
-    libc.zarray_get(detection, i, byref(det))
-    print "For tag", i 
-    print "ID:", det.contents.id
-    print "Hamming:", det.contents.hamming
-    print "Center:", det.contents.c[0], det.contents.c[1]
-    print "family:", det.contents.family.contents.name
-    print "points:", det.contents.p[0], det.contents.p[1]
-  '''
