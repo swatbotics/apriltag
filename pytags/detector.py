@@ -55,16 +55,18 @@ class pytags_detector:
     libc.tag36h11_create.restype = POINTER(cts.apriltag_family)
     libc.apriltag_detector_detect.restype = POINTER(cts.zarray)
     libc.image_u8_create_from_pnm.restype = POINTER(cts.image_u8)
+    libc.tag_create_by_name.restype = POINTER(cts.apriltag_family)
     
     self.tag_detector = libc.apriltag_detector_create()
     self.img = None
     self.img_file = None
 
 
-  def add_tag_family(self):
+  def add_tag_family(self, name):
     #Right now this is hardcoded for tag36h11. Can change easily once I know how 
     #tag families work.
-    tag_family = libc.tag36h11_create()
+    #tag_family = libc.tag36h11_create()
+    tag_family = libc.tag_create_by_name(name)
     libc.apriltag_detector_add_family(self.tag_detector, tag_family)
 
   def load_pnm_image(self, filename):
@@ -106,7 +108,9 @@ class pytags_detector:
 if __name__ == '__main__':
   detector = pytags_detector()
   detector.load_pnm_image("./sample_pic.pnm")
-  detector.add_tag_family() #Do we want this to be variable? Easy to do.
+  detector.add_tag_family("tag36h11") #Do we want this to be variable? Easy to do.
+  detector.add_tag_family("tag25h9") 
+  detector.add_tag_family("tag36h11") 
   tag_info = detector.process()
   tag_info.print_info()
   tag_info.show_tags()
