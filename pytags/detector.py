@@ -110,7 +110,6 @@ if __name__ == '__main__':
   detector.load_pnm_image("./sample_pic.pnm")
   detector.add_tag_family("tag36h11") #Do we want this to be variable? Easy to do.
   detector.add_tag_family("tag25h9") 
-  detector.add_tag_family("tag36h11") 
   tag_info = detector.process()
   tag_info.print_info()
   tag_info.show_tags()
