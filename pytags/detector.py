@@ -2,8 +2,17 @@ from ctypes import *
 import ctype_structs as cts
 import cv2
 import numpy as np
+import os
 
-libc = CDLL('./../build/lib/libapriltag.so')
+uname0 = os.uname()[0]
+
+if uname0 == 'Darwin':
+  extension = '.dylib'
+else:
+  extension = '.so' # TODO test on windows?
+
+
+libc = CDLL('./../build/lib/libapriltag'+extension)
 
 class pytag_info:
   def __init__(self):
