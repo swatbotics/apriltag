@@ -23,13 +23,19 @@ height, width = img.shape
 libc.image_u8_create.restype = POINTER(cts.image_u8)
 c_img = libc.image_u8_create(width, height)
 
+# get the uint8 pointer from ctypes
 buf = c_img.contents.buf
 
+# wrap that pointer with a numpy array -- pointer stays pointing at
+# the same memory, but now numpy can access it directly.
 tmp = np.ctypeslib.as_array(buf, (c_img.contents.height,
-                                c_img.contents.stride))
+                                  c_img.contents.stride))
 
+# copy the opencv image into the destination array (note we still need
+# to deal with difference between stride & width)
 tmp[:, :width] = img
 
+# make sure the image_u8 stuff works now
 libc.image_u8_write_pnm(c_img, "foo.pnm")
 
 
