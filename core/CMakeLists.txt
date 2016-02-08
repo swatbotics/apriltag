@@ -6,7 +6,7 @@ set(sources
   common/workerpool.c common/time_util.c common/svd22.c 
   common/homography.c common/string_util.c common/getopt.c
   contrib/box.c contrib/contour.c contrib/lm.c contrib/pdfutil.c
-  contrib/apriltag_quad_contour.c contrib/tag_families.c)
+  contrib/apriltag_quad_contour.c)
 
 include_directories(common contrib .)
 

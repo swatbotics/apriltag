@@ -33,57 +33,110 @@ class pytag_info:
     print len(self.data), "tags found"
 
   def show_tags(self):
-    image = cv2.imread(self.img)
-    cv2.imshow('Image', image)
+    cv2.imshow('Image', self.img)
     cv2.waitKey(0)
+
+    image = self.img[:]
 
     for datum in self.data:
       lines = np.array(datum['corners'])
       lines.reshape(-1,1,2)
       cv2.polylines(image, [lines], True, (0, 0, 255),5)
-    cv2.imshow('Image', image)
 
+    cv2.imshow('Image', image)
     cv2.waitKey(0)
 
 
 class pytags_detector:
   def __init__(self):
     #Declare return types
-    libc.apriltag_detector_create.restype = POINTER(cts.apriltag_detector)
-    
-    #Right now we're hardcoding which tag family we're using.
-    libc.tag36h11_create.restype = POINTER(cts.apriltag_family)
-    libc.apriltag_detector_detect.restype = POINTER(cts.zarray)
-    libc.image_u8_create_from_pnm.restype = POINTER(cts.image_u8)
-    libc.tag_create_by_name.restype = POINTER(cts.apriltag_family)
-    
+    self.declareReturnTypes()
+
+    #Create the detector and the empty image variable
     self.tag_detector = libc.apriltag_detector_create()
+    self.c_img = None
     self.img = None
-    self.img_file = None
+
+  def declareReturnTypes(self):
+    #Declare return type for detector constructor
+    libc.apriltag_detector_create.restype = POINTER(cts.apriltag_detector)
+
+    #declare return type for tag family constructors
+    libc.tag36h11_create.restype = POINTER(cts.apriltag_family)
+    libc.tag16h5_create.restype = POINTER(cts.apriltag_family)
+    libc.tag25h7_create.restype = POINTER(cts.apriltag_family)
+    libc.tag25h9_create.restype = POINTER(cts.apriltag_family)
+    libc.tag36h10_create.restype = POINTER(cts.apriltag_family)
+
+    #declare return type for detection
+    libc.apriltag_detector_detect.restype = POINTER(cts.zarray)
+
+    #declare return type for image construction
+    libc.image_u8_create.restype = POINTER(cts.image_u8)
 
 
   def add_tag_family(self, name):
-    #Right now this is hardcoded for tag36h11. Can change easily once I know how 
-    #tag families work.
-    #tag_family = libc.tag36h11_create()
-    tag_family = libc.tag_create_by_name(name)
+    
+    if name == 'tag16h5':
+      tag_family = libc.tag16h5_create()
+    elif name == 'tag25h7':
+      tag_family = libc.tag25h7_create()
+    elif name == 'tag25h9':
+      tag_family = libc.tag25h9_create()
+    elif name == 'tag36h10':
+      tag_family = libc.tag35h10_create()
+    elif name == 'tag36h11':
+      tag_family = libc.tag36h11_create()
+    else:
+      print "Unrecognized tag family name."
+      return 1
+    
+    #add the family to the detector
     libc.apriltag_detector_add_family(self.tag_detector, tag_family)
 
-  def load_pnm_image(self, filename):
-    self.img_file = filename
-    self.img = libc.image_u8_create_from_pnm(filename)
+
+  def load_image_from_file(self, filename):
+    img = cv2.imread(filename)
+    self.load_image(img)
+    return 0
+
+  def load_image(self, orig_img):
+    self.img = orig_img
+
+    img = cv2.cvtColor(orig_img, cv2.COLOR_BGR2GRAY)
+
+    height = img.shape[0]
+    width = img.shape[1]
+    c_img = libc.image_u8_create(width, height)
+    #test = list(np.zeros((height, c_img.contents.stride)))
+    
+    for i in range(0, height):
+      for j in range(0, width):
+        #test[i][j] = img[i][j]
+        c_img.contents.buf[c_img.contents.stride*i+j] = img[i][j]
+    #test2 = np.array(test).flatten()
+    #print test2
+    #c_img.contents.buf = test2.ctypes.data_as(POINTER(c_uint8))
+
+    self.c_img = c_img
 
   def process(self):
+    
+    if not self.c_img:
+      raise Exception("The image was not successfully loaded.")
+
     #detect apriltags in the image
-    detections = libc.apriltag_detector_detect(self.tag_detector, self.img)
+    detections = libc.apriltag_detector_detect(self.tag_detector, self.c_img)
     
     #create a pytags_info object
     tag_info = pytag_info()
     for i in range(0, detections.contents.size):
+      #extract the data for each apriltag that was identified
       tag = POINTER(cts.apriltag_detection)()
       libc.zarray_get(detections, i, byref(tag))
       tag = tag.contents
       
+      #write the data from the apriltag_detection object to our pytag object
       new_info = {}
       new_info['tag_family'] = tag.family.contents.name #Just the name of the apriltag_family
       new_info['tag_id'] = tag.id #code ID
@@ -96,20 +149,22 @@ class pytags_detector:
                              (int(tag.p[1][0]), int(tag.p[1][1])),
                              (int(tag.p[2][0]), int(tag.p[2][1])),
                              (int(tag.p[3][0]), int(tag.p[3][1]))]
+
       #Append this dict to the tag data array
       tag_info.data.append(new_info)
-      tag_info.img = self.img_file
+      tag_info.img = self.img
 
     return tag_info
 
 
-
-
 if __name__ == '__main__':
   detector = pytags_detector()
-  detector.load_pnm_image("./sample_pic.pnm")
-  detector.add_tag_family("tag36h11") #Do we want this to be variable? Easy to do.
+  img = cv2.imread('./sample_pic.png')
+
+  detector.load_image(img)
+  detector.add_tag_family("tag36h11")
   detector.add_tag_family("tag25h9") 
   tag_info = detector.process()
+  
   tag_info.print_info()
   tag_info.show_tags()

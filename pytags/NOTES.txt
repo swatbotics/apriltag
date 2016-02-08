@@ -19,3 +19,20 @@ Questions:
 How do the tag families work? Should I load all of them, or does it need to be selective? How are they commonly used and which ones are most normal?
 
 Thoughts on loading a non pnm image? It's awful... So there's that.
+
+
+
+
+
+Stride is bytes/line
+Maybe want it to be a multiple of eight. 
+stride is a multiple of the alignemnt
+
+
+want to do:
+1)
+img=cv2.imread()
+img = grayscale()
+detector.detect(img)
+
+2) add functionality for different families. remove matt's c stuff

@@ -7,7 +7,7 @@ class image_u8(Structure):
   _fields_ = [("width", c_int),
               ("height", c_int),
               ("stride", c_int),
-              ("buf", POINTER(c_int))]
+              ("buf", POINTER(c_uint8))]
 
 
 class apriltag_family(Structure):
@@ -17,8 +17,7 @@ class apriltag_family(Structure):
               ("d", c_int32),
               ("h", c_int32),
               ("name", c_char_p),
-              ("impl", c_void_p)
-             ]
+              ("impl", c_void_p)]
 
 class matd_t(Structure):
   _fields_ = [("rows", c_int),
@@ -34,33 +33,13 @@ class apriltag_detection(Structure):
               ("decision_margin", c_float),
               ("H", POINTER(matd_t)),
               ("c", c_double*2),
-              ("p", (c_double*2)*4)
-              ]
+              ("p", (c_double*2)*4)]
 
 class zarray(Structure):
   _fields_ = [("el_sz", c_size_t),
               ("size", c_int),
               ("alloc", c_int),
               ("data", c_void_p)]
-
-
-#The class zarray is unspecific in defining what it
-#is storing. Python needs to know every sublevel stored
-#datatype, so zarray_det is a zarray storing detection 
-#objects and zarray_fam is a zarray storing tag_families
-class zarray_det(Structure):
-  _fields_ = [("el_sz", c_size_t),
-              ("size", c_int),
-              ("alloc", c_int),
-              ("data", c_char_p)]
-
-
-class zarray_fam(Structure):
-  _fields_ = [("el_sz", c_size_t),
-              ("size", c_int),
-              ("alloc", c_int),
-              ("data", c_char_p)]
-
 
 
 class apriltag_detector(Structure):
