@@ -103,20 +103,24 @@ class pytags_detector:
   def load_image(self, orig_img):
     self.img = orig_img
 
-    img = cv2.cvtColor(orig_img, cv2.COLOR_BGR2GRAY)
+    img = cv2.cvtColor(orig_img, cv2.COLOR_RGB2GRAY)
 
     height = img.shape[0]
     width = img.shape[1]
     c_img = libc.image_u8_create(width, height)
-    #test = list(np.zeros((height, c_img.contents.stride)))
-    
-    for i in range(0, height):
-      for j in range(0, width):
-        #test[i][j] = img[i][j]
-        c_img.contents.buf[c_img.contents.stride*i+j] = img[i][j]
-    #test2 = np.array(test).flatten()
-    #print test2
-    #c_img.contents.buf = test2.ctypes.data_as(POINTER(c_uint8))
+
+    # wrap that pointer with a numpy array -- pointer stays pointing at
+    # the same memory, but now numpy can access it directly.
+    tmp = np.ctypeslib.as_array(c_img.contents.buf,
+                                (c_img.contents.height,
+                                 c_img.contents.stride))
+
+    # copy the opencv image into the destination array (note we still need
+    # to deal with difference between stride & width)
+    tmp[:, :width] = img
+
+    # tmp goes out of scope here but we don't care because
+    # the underlying data is still in c_img.
 
     self.c_img = c_img
 
