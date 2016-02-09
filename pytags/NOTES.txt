@@ -30,9 +30,13 @@ stride is a multiple of the alignemnt
 
 
 want to do:
-1)
-img=cv2.imread()
-img = grayscale()
-detector.detect(img)
+1) Make the class more stateless. Remove self.img, self.c_img. Make process just take an img. 
+2) Get key for robot lab.
+3) Run camera calibration.
+4) Set up ros folder (farnsworth, same credentials as last semester).
+5) How can you measure the accuracy of the 3d transformation estimation. How can we model that error, and get ground truth of that.
+6) rename things, move libc into init.
 
-2) add functionality for different families. remove matt's c stuff
+
+5) Read more about graphslam and fastslam. Pick a good sparse slam representation to start out with. Think about how to implement it with the robot.
+  -Another thing: 
