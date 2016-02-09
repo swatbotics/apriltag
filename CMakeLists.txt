@@ -7,17 +7,11 @@ if(THREADS_HAVE_PTHREAD_ARG)
   add_compile_options("-pthread")
 endif()
 
-add_compile_options("-Wall")
-add_compile_options("-Wsign-compare")
-add_compile_options("-g")
-add_compile_options("-march=native")
-add_compile_options("-pthread")
+set(EXTRA_FLAGS "-Wall -Wsign-compare -g -march=native -pthread")
+set(EXTRA_C_FLAGS "${EXTRA_FLAGS} -std=c99")
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99")
-set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -std=c99")
-set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -std=c99")
-set(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} -std=c99")
-
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${EXTRA_FLAGS}")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${EXTRA_C_FLAGS}")
 
 set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR})
 set(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/lib)
