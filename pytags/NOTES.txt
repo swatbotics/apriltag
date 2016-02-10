@@ -21,9 +21,6 @@ How do the tag families work? Should I load all of them, or does it need to be s
 Thoughts on loading a non pnm image? It's awful... So there's that.
 
 
-
-
-
 Stride is bytes/line
 Maybe want it to be a multiple of eight. 
 stride is a multiple of the alignemnt
@@ -40,3 +37,11 @@ want to do:
 
 5) Read more about graphslam and fastslam. Pick a good sparse slam representation to start out with. Think about how to implement it with the robot.
   -Another thing: 
+
+COMMANDS TO SET UP THE ROBOT:
+`roscore`
+`roslaunch turtlebot_bringup minimal.launch`
+`roslaunch turtlebot_bringup 3dsensor.launch`
+<whatever script I'm running>
+Maybe try '/camera/rgb/image_raw'
+
