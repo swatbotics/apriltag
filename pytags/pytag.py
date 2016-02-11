@@ -29,15 +29,19 @@ class tag_info:
     cv2.imshow('Image', self.img)
     cv2.waitKey(0)
 
-    image = self.img[:]
-
-    for datum in self.data:
-      lines = np.array(datum['corners'])
-      lines.reshape(-1,1,2)
-      cv2.polylines(image, [lines], True, (0, 0, 255),5)
+    image = self.get_image()
 
     cv2.imshow('Image', image)
     cv2.waitKey(0)
+
+  def get_image(self):
+    image = self.img[:]
+    for datum in self.data:
+      lines = np.array(datum['corners'])
+      lines.reshape(-1,1,2)
+      cv2.polylines(image, [lines], True, (0, 0, 255), 5)
+
+    return image
 
 
 class detector:
