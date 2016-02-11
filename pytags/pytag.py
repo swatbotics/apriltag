@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import sys
 import os
-
+import copy
 
 
 class tag_info:
@@ -35,7 +35,7 @@ class tag_info:
     cv2.waitKey(0)
 
   def get_image(self):
-    image = self.img[:]
+    image = copy.copy(self.img)
     for datum in self.data:
       lines = np.array(datum['corners'])
       lines.reshape(-1,1,2)
@@ -54,13 +54,15 @@ class detector:
       extension = '.so' # TODO test on windows?
 
     #load the c library and store it as a class variable
-    self.libc = CDLL('./../build/lib/libapriltag'+extension)
+    #self.libc = CDLL('./../build/lib/libapriltag'+extension)
+    self.libc = CDLL('/home/team2/c-apriltag/build/lib/libapriltag'+extension)
 
     #Declare return types of libc function
     self._declare_return_types()
 
     #Create the c-apriltag detector object
     self.tag_detector = self.libc.apriltag_detector_create()
+    #self.libc.apriltag_detector_enable_quad_contours(self.tag_detector, 1)
 
     #Add tags. 
     if tag_name:
@@ -75,6 +77,7 @@ class detector:
     
     #create a pytags_info object
     return_info = tag_info()
+    return_info.img = img
     for i in range(0, detections.contents.size):
       #extract the data for each apriltag that was identified
       tag = POINTER(cts.apriltag_detection)()
@@ -97,8 +100,7 @@ class detector:
 
       #Append this dict to the tag data array
       return_info.data.append(new_info)
-      return_info.img = img #store the original image in the tag_info object
-
+    
     return return_info
 
 
