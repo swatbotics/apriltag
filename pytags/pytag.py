@@ -54,8 +54,8 @@ class detector:
       extension = '.so' # TODO test on windows?
 
     #load the c library and store it as a class variable
-    #self.libc = CDLL('./../build/lib/libapriltag'+extension)
-    self.libc = CDLL('/home/team2/c-apriltag/build/lib/libapriltag'+extension)
+    self.libc = CDLL('./../build/lib/libapriltag'+extension)
+    #self.libc = CDLL('/home/team2/c-apriltag/build/lib/libapriltag'+extension)
 
     #Declare return types of libc function
     self._declare_return_types()
@@ -69,7 +69,7 @@ class detector:
       self.add_tag_family(tag_name)
 
 
-  def detect(self, img):
+  def detect(self, img, threshold=2):
     c_img = self._convert_image(img)
     
     #detect apriltags in the image
@@ -80,10 +80,12 @@ class detector:
     return_info.img = img
     for i in range(0, detections.contents.size):
       #extract the data for each apriltag that was identified
-      tag = POINTER(cts.apriltag_detection)()
-      self.libc.zarray_get(detections, i, byref(tag))
-      tag = tag.contents
-      
+      apriltag = POINTER(cts.apriltag_detection)()
+      self.libc.zarray_get(detections, i, byref(apriltag))
+      tag = apriltag.contents
+      if tag.hamming >= threshold:
+        continue
+
       #write the data from the apriltag_detection object to our pytag object
       new_info = {}
       new_info['tag_family'] = tag.family.contents.name #Just the name of the apriltag_family
@@ -164,10 +166,10 @@ class detector:
 
 
 if __name__ == '__main__':
-  img = cv2.imread('./sample_pic.png')
+  img = cv2.imread('./diabolic_image_orig.jpg')
 
   det = detector()
-  info = det.detect(img)
+  info = det.detect(img, 2)
   
   info.print_info()
   info.show_tags()
