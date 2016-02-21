@@ -10,6 +10,7 @@ import copy
 class tag_info:
   def __init__(self):
     self.data = []
+    self.raw = []
     self.img = None
   
   def print_info(self):
@@ -69,7 +70,7 @@ class detector:
       self.add_tag_family(tag_name)
 
 
-  def detect(self, img, threshold=2):
+  def detect(self, img, threshold=1):
     c_img = self._convert_image(img)
     
     #detect apriltags in the image
@@ -102,6 +103,7 @@ class detector:
 
       #Append this dict to the tag data array
       return_info.data.append(new_info)
+      return_info.raw.append(tag)
     
     return return_info
 

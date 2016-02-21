@@ -19,10 +19,15 @@ class apriltag_family(Structure):
               ("name", c_char_p),
               ("impl", c_void_p)]
 
-class matd_t(Structure):
+class matd_3(Structure):
   _fields_ = [("rows", c_int),
               ("cols", c_int),
               ("data", (c_double*3)*3)]
+
+class matd_4(Structure):
+  _fields_ = [("rows", c_int),
+              ("cols", c_int),
+              ("data", (c_double*4)*4)]
 
 
 class apriltag_detection(Structure):
@@ -31,7 +36,7 @@ class apriltag_detection(Structure):
               ("hamming", c_int),
               ("goodness", c_float),
               ("decision_margin", c_float),
-              ("H", POINTER(matd_t)),
+              ("H", POINTER(matd_3)),
               ("c", c_double*2),
               ("p", (c_double*2)*4)]
 
