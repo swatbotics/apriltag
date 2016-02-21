@@ -55,8 +55,8 @@ class detector:
       extension = '.so' # TODO test on windows?
 
     #load the c library and store it as a class variable
-    self.libc = CDLL('./../build/lib/libapriltag'+extension)
-    #self.libc = CDLL('/home/team2/c-apriltag/build/lib/libapriltag'+extension)
+    #self.libc = CDLL('./../build/lib/libapriltag'+extension)
+    self.libc = CDLL('/home/team2/c-apriltag/build/lib/libapriltag'+extension)
 
     #Declare return types of libc function
     self._declare_return_types()
@@ -66,8 +66,7 @@ class detector:
     #self.libc.apriltag_detector_enable_quad_contours(self.tag_detector, 1)
 
     #Add tags. 
-    if tag_name:
-      self.add_tag_family(tag_name)
+    self.add_tag_family(tag_name)
 
 
   def detect(self, img, threshold=1):
