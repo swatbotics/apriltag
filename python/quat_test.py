@@ -231,6 +231,7 @@ def rqr_deriv(q):
 def xform_identity():
     return ( numpy.array([0., 0., 0., 1.]), numpy.array([0., 0., 0.]) )
 
+
 ######################################################################
 # inverse of a rigid transform
 
@@ -280,44 +281,40 @@ def xform_transform_inverse(xform, p):
 # compose the transformation with a 6x1 twist = (rvec, tvec)
 
 def xform_compose_twist(xform, twist):
-
-    q, t = xform
-    rvec = twist[0:3]
-    tvec = twist[3:6]
-    qnew = quaternion_multiply(quaternion_from_rvec(rvec), q)
-    tnew = t + tvec
-    return (qnew, tnew)
-
+    x2 = ( quaternion_from_rvec(twist[0:3]), twist[3:6] )
+    return xform_compose(xform, x2)
+    
 ######################################################################
-# we want xform_compose_twist(xb, xform_error(xa, xb)) == xa
+# we want xform_compose_twist(xa, xform_error(xa, xb)) == xb
+#
+# optionally returns jacobians as well
 
-def xform_error(xform_a, xform_b):
+def xform_error(xform_a, xform_b, return_jacobians=False):
 
-    # simple way
-    qa, ta = xform_a
-    qb, tb = xform_b
-    q = quaternion_multiply(qa, quaternion_inverse(qb))
+    q, t = xform_compose( xform_inverse(xform_a), xform_b )
+
     twist = numpy.zeros(6)
     twist[0:3] = rvec_from_quaternion(q)
-    twist[3:6] = ta - tb
-    return twist
+    twist[3:6] = t
 
-######################################################################
-# returns the jacobian of xform_error with respect to a twist applied
-# to A, evaluated at twist = 0
+    if not return_jacobians:
+        return twist
+    else:
 
-def xform_error_jacobian(xform_a, xform_b):
+        R = quaternion_matrix(q)[:3, :3]
 
-    qa, ta = xform_a
-    qb, tb = xform_b
-    q = quaternion_multiply(qb, quaternion_inverse(qa))
+        A = numpy.zeros((6,6))
 
-    A = numpy.zeros((6,6))
+        A[:3, :3] = -rqr_deriv(q)
+        A[3:, 3:] = -numpy.eye(3)
+        A[3:, :3] = cross_matrix_3x3(t)
+        
+        B = numpy.zeros((6,6))
+        B[:3,:3] = -A[:3,:3].T
+        B[3:,3:] = R
 
-    A[:3,:3] = rqr_deriv(q).T
-    A[3:,3:] = numpy.eye(3)
+        return twist, A, B
 
-    return A
 
 ######################################################################
 
@@ -384,35 +381,18 @@ def _test_xforms():
     title('xforms')
 
     # a rigid transform is a (q, tvec) pair
-    xb = ( quaternion_from_rvec((0.3, 0.1, 0.2)),
+    xa = ( quaternion_from_rvec((0.1, 0.2, 0.3)),
+           numpy.array((0.55, 0.66, 0.77)) )
+    
+    xb = ( quaternion_from_rvec((0.11, 0.22, 0.33)),
            numpy.array((0.5, 0.6, 0.7)) )
 
-    # a "twist" is a differential rotation vector, and translation
-    # vector, concatenated to be 6x1 (e.g. an "action")
-    twist = numpy.array([ 0.05, 0.03, 0.02, 0.04, 0.07, 0.01 ] )
+    twist, A, B = xform_error(xa, xb, True)
 
-    # composing twists with transforms acts on the transform's
-    # rotation and translation independently
-    xa = xform_compose_twist(xb, twist)
+    xb2 = xform_compose_twist(xa, twist)
 
-    # xform_error(xa, xb) returns the twist to compose with xb in
-    # order to obtain xa.
-    #
-    # hence, we expect that
-    #
-    #   xform_compose_twist(xb, xform_error(xa, xb)) == xa
-    twist2 = xform_error(xa, xb)
-    
-    check('twist', twist, 'twist2', twist2)
-    
-    xa2 = xform_compose_twist(xb, xform_error(xa, xb))
-
-    check('xa[0]', xa[0], 'xa2[0]', xa2[0])
-    check('xa[1]', xa[1], 'xa2[1]', xa2[1])
-
-    # make sure our jacobians work ok
-    A = xform_error_jacobian(xa, xb)
-    B = -A.T
+    check('xb[0]', xb[0], 'xb2[0]', xb2[0])
+    check('xb[1]', xb[1], 'xb2[1]', xb2[1])
 
     check_jacobian('A', lambda t: xform_error(xform_compose_twist(xa, t), xb),
                    numpy.zeros(6), A)
@@ -426,119 +406,123 @@ def _test_projections():
 
     title('projections')
 
-    # tag size
-    S = 0.03
+    ##################################################
+    # set up tag object points
 
+    # tag size
+    S = 0.1
+
+    # make a bunch of points in tag coordinate frame
     object_points = numpy.array([
         [ -S,  S, 0 ],
         [  S,  S, 0 ],
         [  S, -S, 0 ],
         [ -S, -S, 0 ] ])
 
-    # assume xc = world_from_camera 
-    # assume xo = world_from_object
-    # we want camera_from_object = inverse(xc) * xo
+    printit('object_points', object_points)
 
-    # our goal is ACTUALLY to get Jacobians of uv's in image wrt twists applied to xc and xo
-
-    xc = ( quaternion_from_rvec((0, 1.5, 0)), numpy.array((3., 0., 2.)) )
-    xo = ( quaternion_from_rvec((0, 1.51, 0)), numpy.array((4., 0, 2.)) )
-
-    rel_xform = lambda xc, xo: xform_compose( xform_inverse(xc), xo )
-    rvec_func = lambda xc, xo: rvec_from_quaternion(rel_xform(xc, xo)[0])
-    tvec_func = lambda xc, xo: rel_xform(xc, xo)[1]
-
-    rvec = rvec_func(xc, xo)
-    tvec = tvec_func(xc, xo)
-
-    # let's look at JArvec = [ drvec / dxc ]
-    JArvec_num = num_jac(lambda delta: rvec_func(xform_compose_twist(xc, delta), xo),
-                         numpy.zeros(6))
-
-    JAtvec_num = num_jac(lambda delta: tvec_func(xform_compose_twist(xc, delta), xo),
-                         numpy.zeros(6))
-
-    # let's look at JBrvec = [ drvec / dxc ]
-    JBrvec_num = num_jac(lambda delta: rvec_func(xc, xform_compose_twist(xo, delta)),
-                         numpy.zeros(6))
-
-    JBtvec_num = num_jac(lambda delta: tvec_func(xc, xform_compose_twist(xo, delta)),
-                         numpy.zeros(6))
-
-    printit('JArvec_num', JArvec_num)
-    printit('JAtvec_num', JAtvec_num)
-
-    printit('JBrvec_num', JBrvec_num)
-    printit('JBtvec_num', JBtvec_num)
+    ##################################################
+    # set up relative transform
     
-    sys.exit(0)
+    # assume xc = world_from_camera 
+    robot_xform = ( quaternion_from_rvec((0, 1.5, 0)), numpy.array((3., 0., 2.)) )
+    
+    # assume tag_xform = world_from_object
+    tag_xform = ( quaternion_from_rvec((0.03, 1.51, 0.01)), numpy.array((4., 0, 2.)) )
 
-    M = xform_matrix(rel_xform(xc, xo))
+    # we want camera_from_object = inverse(robot_xform) * tag_xform
+    #
+    # that corresponds to the twist returned by xform_error(robot_xform, tag_xform)
+    camera_from_object = xform_compose(xform_inverse(robot_xform), tag_xform)
 
-    camera_points = numpy.dot(M[:3, :3], object_points.T).T + tvec
+    # get the twist (i.e. camera_from_object -> rvec, tvec)
+    twist, JeA, JeB = xform_error(robot_xform, tag_xform, True)
 
+    # make sure these correspond
+    check('rvec_from_quaternion(camera_from_object[0])',
+          rvec_from_quaternion(camera_from_object[0]),
+          'twist[:3]', twist[:3])
+
+    check('camera_from_object[1]',
+          camera_from_object[1],
+          'twist[3:]', twist[3:])
+    
+    ##################################################
+    # transform object points into camera frame
+    
+    M = xform_matrix(camera_from_object)
+    camera_points = numpy.dot(M[:3, :3], object_points.T).T + M[:3, 3]
+
+    printit('M', M)
+    
+    printit('camera_points', camera_points)
+
+    ##################################################
+    # set up our intrinisic parameters
+    
     f = 525.0
 
-    p = numpy.array([f, f, 320.0, 240.0])
-    
-    make_k = lambda p: numpy.array([[p[0], 0, p[2]],
-                                    [0, p[1], p[3]],
-                                    [0, 0, 1]])
-
-    K = make_k(p)
+    K = numpy.array([ [ f, 0, 320.0 ],
+                      [ 0, f, 240.0 ],
+                      [ 0, 0, 1 ] ])
 
     dist_coeffs = numpy.zeros(4)
 
+    ##################################################
+    # project camera frame -> sensor plane
+    
     sensor_points = numpy.dot(K, camera_points.T).T
 
+    printit('sensor_points', sensor_points)
+    
     uvs = sensor_points[:, :2] / (sensor_points[:, 2])[:, None]
 
-    #cv2.projectPoints(objectPoints, rvec, tvec, cameraMatrix, distCoeffs[, imagePoints[, jacobian[, aspectRatio]]])
+    ##################################################
+    # map (rvec, tvec) twist and intrinisic parameters to uvs and jacobian
 
-    # let N be our number of points
-    # J is 2N (number of output coords) by 10 + num dist coeffs
-    uvs2, J = cv2.projectPoints(object_points.reshape((-1, 1, 3)),
-                                rvec, tvec,
-                                K, dist_coeffs)
+    meas_func = lambda twist: cv2.projectPoints(object_points.reshape((-1, 1, 3)),
+                                                twist[:3], twist[3:],
+                                                K, dist_coeffs)
 
-    Jrvec = J[:, 0:3]
-    Jtvec = J[:, 3:6]
-    JK = J[:, 6:10]
+    uvs2, J = meas_func(twist)
 
-    printit('M', M)
-    printit('object_points', object_points)
-    printit('camera_points', camera_points)
-    printit('sensor_points', sensor_points)
-    check('uvs', uvs, 'uvs2', uvs2.reshape((-1, 2)))
+    check('uvs', uvs.flatten(), 'uvs2', uvs2.flatten())
 
-    check_jacobian('Jrvec',
-                   lambda r: cv2.projectPoints(object_points.reshape((-1, 1, 3)),
-                                               r, tvec, K, dist_coeffs)[0].flatten(),
-                   rvec,
-                   Jrvec)
-
-    check_jacobian('Jtvec',
-                   lambda t: cv2.projectPoints(object_points.reshape((-1, 1, 3)),
-                                               rvec, t, K, dist_coeffs)[0].flatten(),
-                   tvec,
-                   Jtvec)
-
-    check_jacobian('JK',
-                   lambda p: cv2.projectPoints(object_points.reshape((-1, 1, 3)),
-                                               rvec, tvec, make_k(p), dist_coeffs)[0].flatten(),
-                   p,
-                   JK)
-
-    # eventually, let A be [ duv / twist applied to camera ] 8x6
-    # eventually, let B be [ duv / twist applied to object ] 8x6
-
-    # based on the matrix chain rule:
+    # the first 6 columns form the array
     #
-    # total derivative = sum of partials
-    #
-    # A = [duv/dtvec] * [dtvec/ twist to camera ] + [ duv/drvec ] * [ drvec / twist to camera ]
-    #   = 8x3         * 3x6                         8x3             3x6
+    # [ duv / dtwist ] = [ duv/drvec | duv/dtvec ]
+    Jrt = J[:, 0:6]
+
+    f = lambda twist: meas_func(twist)[0].flatten()
+
+    check_jacobian('Jrt', f, twist, Jrt)
+
+    ######################################################################
     
+    # we want the derivative of the expected measurement with respect
+    # to delta robot transform and with respect to delta tag xform
+    #
+    # the matrix chain rule says
+    #
+    #  [ duv / delta xform ] = [ duv / dtwist ] * [ dtwist / delta xform ]
+    #  8x6                   = 8x6                6x6
+    #
+    A = numpy.dot(Jrt, JeA)
+    B = numpy.dot(Jrt, JeB)
+
+    dA = lambda delta: xform_error(xform_compose_twist(robot_xform, delta), tag_xform)
+    dB = lambda delta: xform_error(robot_xform, xform_compose_twist(tag_xform, delta))
+
+    fA = lambda delta: f(dA(delta))
+    fB = lambda delta: f(dB(delta))
+
+    check_jacobian('A', fA, numpy.zeros(6), A)
+    check_jacobian('B', fB, numpy.zeros(6), B)
+
+    print 'Holy cow, it works!'
+    print
+    
+
 if __name__ == '__main__':
 
     numpy.set_printoptions(linewidth=200, precision=7, suppress=True)
