@@ -1,3 +1,18 @@
+#!/usr/bin/env python
+"""
+E90 - Pytags
+
+Port of c-apriltags into python. This program creates two classes
+that are used to detect apriltags and extract information from 
+them. Using this module, you can identify all apriltags visible
+in an image, and get information about the location and orientation
+of the tags.
+
+Written By: Isaac Dulin
+Last Updated: 3/13/2016
+"""
+
+
 from ctypes import *
 import ctype_structs as cts
 import cv2
@@ -55,8 +70,8 @@ class detector:
       extension = '.so' # TODO test on windows?
 
     #load the c library and store it as a class variable
-    #self.libc = CDLL('./../build/lib/libapriltag'+extension)
-    self.libc = CDLL('/home/team2/c-apriltag/build/lib/libapriltag'+extension)
+    self.libc = CDLL('/home/isaac/E90/c-apriltag/build/lib/libapriltag'+extension)
+    #self.libc = CDLL('/home/team2/c-apriltag/build/lib/libapriltag'+extension)
 
     #Declare return types of libc function
     self._declare_return_types()
@@ -167,10 +182,14 @@ class detector:
 
 
 if __name__ == '__main__':
-  img = cv2.imread('./diabolic_image_orig.jpg')
-
+  camera = cv2.VideoCapture(0)
   det = detector()
-  info = det.detect(img, 2)
+
+  while True:
+    retval, img = camera.read()
+    info = det.detect(img, 2)
+    info.print_info()
+    info.show_tags()
+
+
   
-  info.print_info()
-  info.show_tags()
