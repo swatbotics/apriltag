@@ -400,6 +400,45 @@ def _test_xforms():
     check_jacobian('B', lambda t: xform_error(xa, xform_compose_twist(xb, t)),
                    numpy.zeros(6), B)
 
+    u = numpy.array([0.1, 0.03, 0.04, 0.3, 0.6, 0.01])
+
+    expected_pose = xform_compose_twist(xa, u)
+
+    e, A, B = xform_error(expected_pose, xb, True)
+
+    # A is [ de / dexpected_pose ]
+    # Aprime should be [ dexpected_pose  / du ]
+
+    #foo = num_jac( lambda u: xform_error(xform_compose_twist(xa, u), expected_pose), u )
+
+    #printit('thingy', foo)
+
+    xform_from_twist = lambda u: ( quaternion_from_rvec(u[:3]), u[3:] )
+    (qu, tu) = xform_from_twist(u)
+    R = quaternion_matrix(qu)[:3, :3]
+
+    foo = numpy.zeros((6,6))
+    foo[:3, :3] = R.T
+    foo[3:, 3:] = R.T
+    foo[3:, :3] = numpy.dot(R.T, -cross_matrix_3x3(tu))
+    
+    printit('foo', foo)
+    
+    thingfunc = lambda delta: xform_error(
+        xform_compose_twist(xform_compose_twist(xa, delta), u), xb)
+    
+    A_numeric = num_jac(thingfunc, numpy.zeros(6))
+    foo_actual = numpy.linalg.solve(A, A_numeric)
+    
+    printit('foo_actual', foo_actual)
+
+    check('foo', foo, 'foo_actual', foo_actual)
+    
+    check_jacobian('A', thingfunc, numpy.zeros(6), numpy.dot(A, foo))
+
+    sys.exit(0)
+
+
 ######################################################################
 
 def _test_projections():
