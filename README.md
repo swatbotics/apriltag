@@ -1,19 +1,26 @@
-c-apriltag - Matt's port
+apriltag
+========
 
-Port from http://april.eecs.umich.edu/software/apriltag-2015-03-18.tgz
+Small modifications/additions to  http://april.eecs.umich.edu/media/apriltag/apriltag-2015-03-18.tgz
 
 Added a new quad detector and a few various speedups.
 
-Build dependencies:
+Dependencies
+============
 
   - OpenCV (optional)
 
-To build, go to root directory of repo and then run the following:
+Building
+========
 
+    cd /path/to/apriltag
     mkdir build
     cd build
     cmake .. -DCMAKE_BUILD_TYPE=Release
     make -j4
+    
+Running
+=======
 
 You can run `aprilag_opencv_demo` to do stuff, run with `-h` to get help.
 
