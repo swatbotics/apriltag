@@ -86,24 +86,7 @@ matd_t* apriltag_vis_warp(const apriltag_detection_t* detection) {
   matd_destroy(S);
   matd_destroy(C);
 
-  /*
-  Mat64fc1 S = Mat64fc1::eye(3,3);
-  S(1,1) = -1;
-  
-  Mat64fc1 H(3,3, detection->H->data);
-
-  Mat64fc1 C = Mat64fc1::eye(3,3);
-
-  C(0,0) = 2.0/sz;
-  C(0,2) = -1.0 - tb/sz;
-  C(1,1) = -2.0/sz;
-  C(1,2) = 1.0 + tb/sz;
-
-  return H * S * C;
-  */
-
   return result;
-
   
 }
 
