@@ -274,8 +274,6 @@ class Detector:
   
       return return_info
 
-
-
   def add_tag_family(self, name):
 
     family = self.libc.apriltag_family_create(name)
