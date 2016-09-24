@@ -154,11 +154,16 @@ int main(int argc, char *argv[])
 
         zarray_t *detections = apriltag_detector_detect(td, im8);
       
-        cv::Mat display = cv::Mat::zeros(orig.size(), orig.type());
-      
+        cv::Mat display;
+
+        if (!nogui) {
+          display = detectionsImage(detections, orig.size(), orig.type());
+        }
+        
         total_detections += zarray_size(detections);
 
         for (int i = 0; i < zarray_size(detections); i++) {
+          
           apriltag_detection_t *det;
           zarray_get(detections, i, &det);
 
@@ -173,11 +178,6 @@ int main(int argc, char *argv[])
 
           hamm_hist[det->hamming]++;
         
-          if (!nogui) {
-            cv::Mat dimg = detectionImage(det, orig.size(), orig.type());
-            display = cv::max(display, dimg);
-          }
-
         }
 
         apriltag_detections_destroy(detections);

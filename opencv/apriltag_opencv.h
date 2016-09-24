@@ -121,13 +121,9 @@ void polylines(cv::Mat image,
                bool closed=true,
                int u=1);
 
-Mat8uc1 makeImage(const apriltag_detection_t* det);
+cv::Mat detectionsImage(zarray_t* detections,
+                        const cv::Size& size,
+                        int type);
 
-Mat64fc1 getWarp(const apriltag_detection_t* detection);
-
-cv::Mat detectionImage(const apriltag_detection_t* detection,
-                       const cv::Size& size,
-                       int type,
-                       const cv::Scalar& bgcolor=cv::Scalar(0,0,0,0));
 
 #endif

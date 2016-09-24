@@ -98,7 +98,7 @@ static inline int imax(int x, int y) {
   return x > y ? x : y;
 }
 
-void apriltag_vis_rasterize(const apriltag_detection_t* detection,
+void apriltag_vis_detection(const apriltag_detection_t* detection,
                             image_u8_t* image) {
 
   // get points and homography
@@ -149,6 +149,17 @@ void apriltag_vis_rasterize(const apriltag_detection_t* detection,
   image_u8_destroy(texture);
   matd_destroy(warp);
   matd_destroy(warp_inv);
-  
 
+}
+
+void apriltag_vis_detections(zarray_t* detections,
+                             image_u8_t* image) {
+
+  for (int i = 0; i < zarray_size(detections); i++) {
+    apriltag_detection_t *det;
+    zarray_get(detections, i, &det);
+    apriltag_vis_detection(det, image);
+  }
+  
+  
 }

@@ -107,7 +107,7 @@ def _matd_get_array(mat_ptr):
 
 DetectionBase = collections.namedtuple(
   'DetectionBase',
-  'raw, tag_family, tag_id, hamming, goodness, decision_margin, '
+  'tag_family, tag_id, hamming, goodness, decision_margin, '
   'homography, center, corners')
 
 class Detection(DetectionBase):
@@ -126,7 +126,7 @@ class Detection(DetectionBase):
 
     for i, label in enumerate(self._print_fields):
       
-      value = str(self[i+1])
+      value = str(self[i])
       
       if value.find('\n') > 0:
         value = value.split('\n')
@@ -226,7 +226,7 @@ class Detector:
     for family in families:
         self.add_tag_family(family)
 
-  def detect(self, img):
+  def detect(self, img, return_image=False):
     
     c_img = self._convert_image(img)
     
@@ -249,7 +249,6 @@ class Detector:
       corners = numpy.ctypeslib.as_array(tag.p, shape=(4,2)).copy()
 
       d = Detection(
-        apriltag,
         tag.family.contents.name,
         tag.id,
         tag.hamming,
@@ -261,20 +260,21 @@ class Detector:
       
       #Append this dict to the tag data array
       return_info.append(d)
+
+    if return_image:
       
-    return return_info
+      height, width = img.shape[:2]
+      c_dimg = self.libc.image_u8_create(width, height)
+      self.libc.apriltag_vis_detections(detections, c_dimg)
+      tmp = _image_u8_get_array(c_dimg)
+      dimg = tmp[:, :width].copy()
+      return return_info, dimg
+    
+    else:
+  
+      return return_info
 
-  def detection_image(self, shape, detections):
 
-    height, width = shape[:2]
-    c_img = self.libc.image_u8_create(width, height)
-
-    for d in detections:
-      self.libc.apriltag_vis_rasterize(d.raw, c_img)
-
-    tmp = _image_u8_get_array(c_img)
-
-    return tmp[:, :width].copy()
 
   def add_tag_family(self, name):
 
@@ -300,7 +300,7 @@ class Detector:
 
     self.libc.apriltag_family_list.restype = ctypes.POINTER(_zarray)
 
-    self.libc.apriltag_vis_rasterize.restype = None
+    self.libc.apriltag_vis_detections.restype = None
 
   def _convert_image(self, img):
     
@@ -348,12 +348,11 @@ def main():
     print 'usage: {} IMAGE.png'
     sys.exit(0)
 
-  options = DetectorOptions(families='tag36h11',
-                            quad_contours=True)
+  options = DetectorOptions(families='tag36h11')
   
   det = Detector(options)
 
-  detections = det.detect(gray)
+  detections, dimg = det.detect(gray, return_image=True)
 
   num_detections = len(detections)
   print 'Detected {} tags.\n'.format(num_detections)
@@ -363,8 +362,6 @@ def main():
     print
     print d.tostring(indent=2)
     print
-
-  dimg = det.detection_image(gray.shape, detections)
 
   if len(orig.shape) == 3:
     dimg_color = dimg[:, :, None]
