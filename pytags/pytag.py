@@ -264,7 +264,6 @@ class Detector:
       
     return return_info
 
-
   def detection_image(self, shape, detections):
 
     height, width = shape[:2]
@@ -288,15 +287,13 @@ class Detector:
       print 'Unrecognized tag family name. Try e.g. tag36h11'
 
   def _declare_return_types(self):
-    #Declare return type for detector constructor
+
     self.libc.apriltag_detector_create.restype = ctypes.POINTER(_apriltag_detector)
 
     self.libc.apriltag_family_create.restype = ctypes.POINTER(_apriltag_family)
-
-    #declare return type for detection
+    
     self.libc.apriltag_detector_detect.restype = ctypes.POINTER(_zarray)
 
-    #declare return type for image construction
     self.libc.image_u8_create.restype = ctypes.POINTER(_image_u8)
 
     self.libc.image_u8_write_pnm.restype = ctypes.c_int
@@ -324,6 +321,8 @@ class Detector:
     # the underlying data is still in c_img.
     return c_img
 
+######################################################################  
+
 def main():
 
   import sys
@@ -333,8 +332,6 @@ def main():
     HAVE_CV2 = True
   except ImportError:
     HAVE_CV2 = False
-
-  HAVE_CV2 = False
 
   if len(sys.argv) > 1:
     if HAVE_CV2:
