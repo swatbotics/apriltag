@@ -2,77 +2,23 @@
 
 #include <opencv2/imgproc/imgproc.hpp>
 #include <iostream>
+#include "apriltag_vis.h"
 
 Mat8uc1 makeImage(const apriltag_detection_t* det) {
 
-  const apriltag_family_t* family = det->family;
-  
-  const uint32_t wb = 1;
-  const uint32_t bb = family->black_border;
-  const uint32_t tb = wb + bb;
-
-  const uint32_t d = family->d;
-
-  uint32_t size = 2*tb + d;
-
-  Mat8uc1 rval(size, size);
-  const uint8_t white = 255, black = 0;
-
-  // borders first
-  for (uint32_t y=0; y<size; ++y) {
-    for (uint32_t x=0; x<size; ++x) {
-      if (y < wb || y+wb >= size || x < wb || x+wb >= size) {
-        rval(y,x) = white;
-      } else {
-        rval(y,x) = black;
-      }
-    }
-  }
-
-  uint64_t v = family->codes[det->id];
-
-  uint64_t bits = d*d;
-
-  // then interior
-  for (uint32_t y=0; y<d; ++y) {
-    for (uint32_t x=0; x<d; ++x) {
-      if ((v&(uint64_t(1)<<uint64_t(bits-1)))!=0) {
-        rval(y+tb,x+tb) = white;
-      } else {
-        rval(y+tb,x+tb) = black;
-      }
-      v = v<<uint64_t(1);
-    }
-  }
-
+  image_u8_t* image = apriltag_vis_image(det);
+  Mat8uc1 rval = im2cv(image).clone();
+  image_u8_destroy(image);
   return rval;
 
 }
 
 Mat64fc1 getWarp(const apriltag_detection_t* detection) {
 
-  double d = detection->family->d;
-  double bb = detection->family->black_border;
-  double wb = 1;
-
-  double tb = 2*wb - bb;
-  
-  double sz = d + 2*bb;
-
-  Mat64fc1 S = Mat64fc1::eye(3,3);
-  S(1,1) = -1;
-  
-  Mat64fc1 H(3,3, detection->H->data);
-
-  Mat64fc1 C = Mat64fc1::eye(3,3);
-
-  C(0,0) = 2.0/sz;
-  C(0,2) = -1.0 - tb/sz;
-  C(1,1) = -2.0/sz;
-  C(1,2) = 1.0 + tb/sz;
-
-  return H * S * C;
-
+  matd_t* w = apriltag_vis_get_warp(detection);
+  Mat64fc1 rval = Mat64fc1(3, 3, w->data).clone();
+  matd_destroy(w);
+  return rval;
 
 }
 

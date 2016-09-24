@@ -458,6 +458,12 @@ static inline int lines_from_corners_contour(const apriltag_detector_t* td,
     int j = (i+3)&3;
     int start = idx[i];
     int count = (idx[j]-idx[i]+n+1)%n;
+
+    if (count < 8) { // not sure why below assert was here, added safety code?
+      fprintf(stderr, "%s:%d: warning: count < 8 :(\n",
+              __FILE__, __LINE__);
+      return 0;
+    }
         
     assert( count >= 8 );
 

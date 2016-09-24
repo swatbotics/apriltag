@@ -36,12 +36,8 @@ either expressed or implied, of the FreeBSD Project.
 #include <unistd.h>
 
 #include "apriltag.h"
+#include "apriltag_family.h"
 #include "image_u8.h"
-#include "tag36h11.h"
-#include "tag36h10.h"
-#include "tag36artoolkit.h"
-#include "tag25h9.h"
-#include "tag25h7.h"
 
 #include "zarray.h"
 #include "getopt.h"
@@ -77,21 +73,12 @@ int main(int argc, char *argv[])
 
     const zarray_t *inputs = getopt_get_extra_args(getopt);
 
-    apriltag_family_t *tf = NULL;
-    const char *famname = getopt_get_string(getopt, "family");
-    if (!strcmp(famname, "tag36h11"))
-        tf = tag36h11_create();
-    else if (!strcmp(famname, "tag36h10"))
-        tf = tag36h10_create();
-    else if (!strcmp(famname, "tag36artoolkit"))
-        tf = tag36artoolkit_create();
-    else if (!strcmp(famname, "tag25h9"))
-        tf = tag25h9_create();
-    else if (!strcmp(famname, "tag25h7"))
-        tf = tag25h7_create();
-    else {
-        printf("Unrecognized tag family name. Use e.g. \"tag36h11\".\n");
-        exit(-1);
+    const char* famname = getopt_get_string(getopt, "family");
+    apriltag_family_t* tf = apriltag_family_create(famname);
+
+    if (!tf) {
+      printf("Unrecognized tag family name. Use e.g. \"tag36h11\".\n");
+      exit(-1);
     }
 
     tf->black_border = getopt_get_int(getopt, "border");
@@ -200,6 +187,6 @@ int main(int argc, char *argv[])
     // don't deallocate contents of inputs; those are the argv
     apriltag_detector_destroy(td);
 
-    tag36h11_destroy(tf);
+    apriltag_family_destroy(tf);
     return 0;
 }

@@ -1,175 +1,309 @@
 #!/usr/bin/env python
-"""
-E90 - Pytags
+"""Python wrapper for C version of apriltags. This program creates two
+classes that are used to detect apriltags and extract information from
+them. Using this module, you can identify all apriltags visible in an
+image, and get information about the location and orientation of the
+tags.
 
-Port of c-apriltags into python. This program creates two classes
-that are used to detect apriltags and extract information from 
-them. Using this module, you can identify all apriltags visible
-in an image, and get information about the location and orientation
-of the tags.
+Original author: Isaac Dulin, Spring 2016
+Updates: Matt Zucker, Fall 2016
 
-Written By: Isaac Dulin
-Last Updated: 3/13/2016
 """
 
-
-from ctypes import *
-import ctype_structs as cts
-import cv2
-import numpy as np
-import sys
+import ctypes
+import collections
 import os
-import copy
+import re
+import numpy
+from PIL import Image
 
+######################################################################
 
-class tag_info:
-  def __init__(self):
-    self.data = []
-    self.raw = []
-    self.img = None
+class _image_u8(ctypes.Structure):
+  _fields_ = [
+    ('width', ctypes.c_int),
+    ('height', ctypes.c_int),
+    ('stride', ctypes.c_int),
+    ('buf', ctypes.POINTER(ctypes.c_uint8))
+  ]
+
+class _image_u32(ctypes.Structure):
+  _fields_ = [
+    ('width', ctypes.c_int),
+    ('height', ctypes.c_int),
+    ('stride', ctypes.c_int),
+    ('buf', ctypes.POINTER(ctypes.c_uint32))
+  ]
   
-  def print_info(self):
-    for i, datum in enumerate(self.data):
-      print 'Tag Number', i
-      print 'ID:', datum['tag_id']
-      print 'Family:', datum['tag_family']
-      print 'Center:', datum['center']
-      print 'Hamming:', datum['hamming']
-      print 'Goodness:', datum['goodness']
-      print 'Homography:\n', datum['homog']
-      print 'Corners:', datum['corners'], '\n'
+class _apriltag_family(ctypes.Structure):
+  _fields_ = [
+    ('ncodes', ctypes.c_int32),
+    ('codes', ctypes.POINTER(ctypes.c_int64)),
+    ('black_border', ctypes.c_int32),
+    ('d', ctypes.c_int32),
+    ('h', ctypes.c_int32),
+    ('name', ctypes.c_char_p),
+  ]
 
-    print len(self.data), "tags found"
+class _matd(ctypes.Structure):
+  _fields_ = [
+    ('nrows', ctypes.c_int),
+    ('ncols', ctypes.c_int),
+    ('data', ctypes.c_double*1),
+  ]  
 
-  def show_tags(self):
-    cv2.imshow('Image', self.img)
-    cv2.waitKey(0)
+class _apriltag_detection(ctypes.Structure):
+  _fields_ = [
+    ('family', ctypes.POINTER(_apriltag_family)),
+    ('id', ctypes.c_int),
+    ('hamming', ctypes.c_int),
+    ('goodness', ctypes.c_float),
+    ('decision_margin', ctypes.c_float),
+    ('H', ctypes.POINTER(_matd)),
+    ('c', ctypes.c_double*2),
+    ('p', (ctypes.c_double*2)*4)
+  ]
 
-    image = self.get_image()
+class _zarray(ctypes.Structure):
+  _fields_ = [
+    ('el_sz', ctypes.c_size_t),
+    ('size', ctypes.c_int),
+    ('alloc', ctypes.c_int),
+    ('data', ctypes.c_void_p)
+  ]
+  
+class _apriltag_detector(ctypes.Structure):
+  _fields_ = [
+    ('nthreads', ctypes.c_int),
+    ('quad_decimate', ctypes.c_float),
+    ('quad_sigma', ctypes.c_float),
+    ('refine_edges', ctypes.c_int),
+    ('refine_decode', ctypes.c_int),
+    ('refine_pose', ctypes.c_int),
+    ('debug', ctypes.c_int),
+    ('quad_contours', ctypes.c_int),
+  ]
 
-    cv2.imshow('Image', image)
-    cv2.waitKey(0)
+######################################################################
+  
+def _ptr_to_array2d(datatype, ptr, rows, cols):
+  array_type = (datatype*cols)*rows
+  array_buf = array_type.from_address(ctypes.addressof(ptr))
+  return numpy.ctypeslib.as_array(array_buf, shape=(rows,cols))
 
-  def get_image(self):
-    image = copy.copy(self.img)
-    for datum in self.data:
-      lines = np.array(datum['corners'])
-      lines.reshape(-1,1,2)
-      cv2.polylines(image, [lines], True, (0, 0, 255), 5)
+def _image_u8_get_array(img_ptr):
+  return _ptr_to_array2d(ctypes.c_uint8,
+                         img_ptr.contents.buf.contents,
+                         img_ptr.contents.height,
+                         img_ptr.contents.stride)
+  
+def _matd_get_array(mat_ptr):
+  return _ptr_to_array2d(ctypes.c_double,
+                         mat_ptr.contents.data,
+                         int(mat_ptr.contents.nrows),
+                         int(mat_ptr.contents.ncols))
 
-    return image
+######################################################################
 
+DetectionBase = collections.namedtuple(
+  'DetectionBase',
+  'tag_family, tag_id, hamming, goodness, decision_margin, '
+  'homography, center, corners')
 
-class detector:
-  def __init__(self, tag_name="all"):
+class Detection(DetectionBase):
 
+  _print_fields = [
+    'Family', 'ID', 'Hamming error', 'Goodness',
+    'Decision margin', 'Homography', 'Center', 'Corners'
+  ]
+
+  _max_len = max(len(field) for field in _print_fields)
+
+  def tostring(self, indent=0):
+
+    rval = []
+    indent_str = ' '*(self._max_len+2+indent)
+
+    for i, label in enumerate(self._print_fields):
+      
+      value = str(self[i])
+      
+      if value.find('\n') > 0:
+        value = value.split('\n')
+        value = [value[0]] + [indent_str+v for v in value[1:]]
+        value = '\n'.join(value)
+      
+      rval.append('{:>{}s}: {}'.format(
+        label, self._max_len+indent, value))
+
+    return '\n'.join(rval)
+
+  def __str__(self):
+    return self.tostring()
+
+######################################################################
+  
+class DetectorOptions:
+
+  def __init__(self,
+               families='tag36h11',
+               border=1,
+               nthreads=4,
+               quad_decimate=1.0,
+               quad_blur=0.0,
+               refine_edges=True,
+               refine_decode=False,
+               refine_pose=False,
+               debug=False,
+               quad_contours=True):
+
+    self.families = families
+    self.border = int(border)
+    
+    self.nthreads = int(nthreads)
+    self.quad_decimate = float(quad_decimate)
+    self.quad_sigma = float(quad_blur)
+    self.refine_edges = int(refine_edges)
+    self.refine_decode = int(refine_decode)
+    self.refine_pose = int(refine_pose)
+    self.debug = int(debug)
+    self.quad_contours = quad_contours
+
+######################################################################    
+               
+class Detector:
+  
+  def __init__(self, options=None):
+
+    if options is None:
+      options = DetectorOptions()
+
+    self.options = options
+      
+
+    # detect OS to get extension for DLL
     uname0 = os.uname()[0]
     if uname0 == 'Darwin':
       extension = '.dylib'
     else:
       extension = '.so' # TODO test on windows?
 
-    #load the c library and store it as a class variable
-    self.libc = CDLL('/home/isaac/E90/c-apriltag/build/lib/libapriltag'+extension)
-    #self.libc = CDLL('/home/team2/c-apriltag/build/lib/libapriltag'+extension)
+    # load the C library and store it as a class variable
+    self.libc = ctypes.CDLL('./../build/lib/libapriltag'+extension)
 
-    #Declare return types of libc function
+    # declare return types of libc function
     self._declare_return_types()
 
-    #Create the c-apriltag detector object
+    # create the c-_apriltag_detector object
     self.tag_detector = self.libc.apriltag_detector_create()
-    #self.libc.apriltag_detector_enable_quad_contours(self.tag_detector, 1)
+    self.tag_detector.contents.nthreads = int(options.nthreads)
+    self.tag_detector.contents.quad_decimate = float(options.quad_decimate)
+    self.tag_detector.contents.quad_sigma = float(options.quad_sigma)
+    self.tag_detector.refine_edges = int(options.refine_edges)
+    self.tag_detector.refine_decode = int(options.refine_decode)
+    self.tag_detector.refine_pose = int(options.refine_pose)
 
-    #Add tags. 
-    self.add_tag_family(tag_name)
+    if options.quad_contours:
+      self.libc.apriltag_detector_enable_quad_contours(self.tag_detector, 1)
 
+    self.families = []
+    
+    flist = self.libc.apriltag_family_list()
+    
+    for i in range(flist.contents.size):
+      ptr = ctypes.c_char_p()
+      self.libc.zarray_get(flist, i, ctypes.byref(ptr))
+      self.families.append(ctypes.string_at(ptr))
 
-  def detect(self, img, threshold=1):
+    if options.families == 'all':
+      families = self.families
+    elif isinstance(options.families, list):
+      families = options.families
+    else:
+      families = [n for n in re.split(r'\W+', options.families) if n]
+
+    # add tags
+    for family in families:
+        self.add_tag_family(family)
+
+  def detect(self, img):
+    
     c_img = self._convert_image(img)
     
     #detect apriltags in the image
     detections = self.libc.apriltag_detector_detect(self.tag_detector, c_img)
     
     #create a pytags_info object
-    return_info = tag_info()
-    return_info.img = img
+    return_info = []
+
     for i in range(0, detections.contents.size):
+
       #extract the data for each apriltag that was identified
-      apriltag = POINTER(cts.apriltag_detection)()
-      self.libc.zarray_get(detections, i, byref(apriltag))
+      apriltag = ctypes.POINTER(_apriltag_detection)()
+      self.libc.zarray_get(detections, i, ctypes.byref(apriltag))
+      
       tag = apriltag.contents
-      if tag.hamming >= threshold:
-        continue
 
-      #write the data from the apriltag_detection object to our pytag object
-      new_info = {}
-      new_info['tag_family'] = tag.family.contents.name #Just the name of the apriltag_family
-      new_info['tag_id'] = tag.id #code ID
-      new_info['hamming'] = tag.hamming #somethin'
-      new_info['goodness'] = tag.goodness #somethin'
-      new_info['decision_margin'] = tag.decision_margin #somethin'
-      new_info['homog'] = np.array(tag.H.contents.data)
-      new_info['center'] = (int(tag.c[0]), int(tag.c[1])) #Center of the tag (tuple)
-      new_info['corners'] = [(int(tag.p[0][0]), int(tag.p[0][1])), #Corners of the tag
-                             (int(tag.p[1][0]), int(tag.p[1][1])),
-                             (int(tag.p[2][0]), int(tag.p[2][1])),
-                             (int(tag.p[3][0]), int(tag.p[3][1]))]
+      homography = _matd_get_array(tag.H).copy()
+      center = numpy.ctypeslib.as_array(tag.c, shape=(2,)).copy()
+      corners = numpy.ctypeslib.as_array(tag.p, shape=(4,2)).copy()
 
+      d = Detection(
+        tag.family.contents.name,
+        tag.id,
+        tag.hamming,
+        tag.goodness,
+        tag.decision_margin,
+        homography,
+        center,
+        corners)
+      
       #Append this dict to the tag data array
-      return_info.data.append(new_info)
-      return_info.raw.append(tag)
-    
+      return_info.append(d)
+      
     return return_info
 
 
   def add_tag_family(self, name):
-    tag_dict = {'tag16h5' : self.libc.tag16h5_create,
-                'tag25h7' : self.libc.tag25h7_create,
-                'tag25h9' : self.libc.tag25h9_create,
-                'tag36h10': self.libc.tag36h10_create,
-                'tag36h11': self.libc.tag36h11_create}
 
-    if name in tag_dict:
-      self.libc.apriltag_detector_add_family(self.tag_detector, tag_dict[name]())
-    elif name=='all':
-      for tag in tag_dict:
-        self.libc.apriltag_detector_add_family(self.tag_detector, tag_dict[tag]())
+    family = self.libc.apriltag_family_create(name)
+
+    if family:
+      family.contents.border = self.options.border
+      self.libc.apriltag_detector_add_family(self.tag_detector, family)
     else:
-      print "Unreecognized tag family name. Options are \'all\' or any tag name."
-      sys.exit(1)
-
+      print 'Unrecognized tag family name. Try e.g. tag36h11'
 
   def _declare_return_types(self):
     #Declare return type for detector constructor
-    self.libc.apriltag_detector_create.restype = POINTER(cts.apriltag_detector)
+    self.libc.apriltag_detector_create.restype = ctypes.POINTER(_apriltag_detector)
 
-    #declare return type for tag family constructors
-    self.libc.tag36h11_create.restype = POINTER(cts.apriltag_family)
-    self.libc.tag16h5_create.restype = POINTER(cts.apriltag_family)
-    self.libc.tag25h7_create.restype = POINTER(cts.apriltag_family)
-    self.libc.tag25h9_create.restype = POINTER(cts.apriltag_family)
-    self.libc.tag36h10_create.restype = POINTER(cts.apriltag_family)
+    self.libc.apriltag_family_create.restype = ctypes.POINTER(_apriltag_family)
 
     #declare return type for detection
-    self.libc.apriltag_detector_detect.restype = POINTER(cts.zarray)
+    self.libc.apriltag_detector_detect.restype = ctypes.POINTER(_zarray)
 
     #declare return type for image construction
-    self.libc.image_u8_create.restype = POINTER(cts.image_u8)
+    self.libc.image_u8_create.restype = ctypes.POINTER(_image_u8)
+
+    self.libc.image_u8_write_pnm.restype = ctypes.c_int
+
+    self.libc.apriltag_family_list.restype = ctypes.POINTER(_zarray)
 
   def _convert_image(self, orig_img):
+    
     self.img = orig_img
 
-    img = cv2.cvtColor(orig_img, cv2.COLOR_RGB2GRAY)
+    if len(orig_img.shape) == 3:
+      img = numpy.array(Image.fromarray(orig_img).convert('L'))
+    else:
+      img = orig_img
 
     height = img.shape[0]
     width = img.shape[1]
     c_img = self.libc.image_u8_create(width, height)
 
-    # wrap that pointer with a numpy array -- pointer stays pointing at
-    # the same memory, but now numpy can access it directly.
-    tmp = np.ctypeslib.as_array(c_img.contents.buf,
-                               (c_img.contents.height,
-                                c_img.contents.stride))
+    tmp = _image_u8_get_array(c_img)
 
     # copy the opencv image into the destination array, accounting for the 
     # difference between stride & width.
@@ -179,17 +313,41 @@ class detector:
     # the underlying data is still in c_img.
     return c_img
 
+def main():
 
+  import sys
 
+  try:
+    import cv2
+    HAVE_CV2 = True
+  except ImportError:
+    HAVE_CV2 = False
+
+  if len(sys.argv) > 1:
+    pil_image = Image.open(sys.argv[1])
+    img = numpy.array(pil_image)
+  else:
+    print 'usage: {} IMAGE.png'
+    sys.exit(0)
+
+  options = DetectorOptions(families='all',
+                            quad_contours=True)
+  
+  det = Detector(options)
+
+  detections = det.detect(img)
+
+  num_detections = len(detections)
+  print 'Detected {} tags.\n'.format(num_detections)
+
+  for i, d in enumerate(detections):
+    print 'Detection {} of {}:'.format(i+1, num_detections)
+    print
+    print d.tostring(indent=2)
+    print
+    
 if __name__ == '__main__':
-  camera = cv2.VideoCapture(0)
-  det = detector()
 
-  while True:
-    retval, img = camera.read()
-    info = det.detect(img, 2)
-    info.print_info()
-    info.show_tags()
-
+  main()
 
   
