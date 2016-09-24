@@ -6,7 +6,7 @@
 
 Mat8uc1 makeImage(const apriltag_detection_t* det) {
 
-  image_u8_t* image = apriltag_vis_image(det);
+  image_u8_t* image = apriltag_vis_texture(det);
   Mat8uc1 rval = im2cv(image).clone();
   image_u8_destroy(image);
   return rval;
@@ -15,7 +15,7 @@ Mat8uc1 makeImage(const apriltag_detection_t* det) {
 
 Mat64fc1 getWarp(const apriltag_detection_t* detection) {
 
-  matd_t* w = apriltag_vis_get_warp(detection);
+  matd_t* w = apriltag_vis_warp(detection);
   Mat64fc1 rval = Mat64fc1(3, 3, w->data).clone();
   matd_destroy(w);
   return rval;
@@ -27,7 +27,37 @@ cv::Mat detectionImage(const apriltag_detection_t* detection,
                        int type,
                        const cv::Scalar& bgcolor) {
 
+
   cv::Mat dst(size, type);
+
+#if 1
+
+  image_u8_t* image = image_u8_create(size.width, size.height);
+  cv::Mat im = im2cv(image);
+
+  apriltag_vis_rasterize(detection, image);
+
+  if (im.depth() != dst.depth()) {
+    cv::Mat i2;
+    double scl = 1.0;
+    if (dst.depth() == CV_32F || dst.depth() == CV_64F) {
+      scl = 1.0/255;
+    } 
+    im.convertTo(i2, dst.depth(), scl);
+    im = i2;
+  }
+
+  if (im.channels() < dst.channels()) {
+    cv::Mat i2;
+    cv::cvtColor(im, i2, cv::COLOR_GRAY2RGB);
+    im = i2;
+  }
+
+  im.copyTo(dst);
+
+  return dst;
+
+#else
 
   cv::Mat im = makeImage(detection);
 
@@ -51,6 +81,9 @@ cv::Mat detectionImage(const apriltag_detection_t* detection,
   cv::warpPerspective(im, dst, W, size, CV_INTER_NN, cv::BORDER_CONSTANT, bgcolor);
 
   return dst;
+
+#endif  
+
 
 }
 

@@ -1,6 +1,8 @@
 #include "apriltag_vis.h"
+#include "homography.h"
+#include <math.h>
 
-image_u8_t* apriltag_vis_image(const apriltag_detection_t* det) {
+image_u8_t* apriltag_vis_texture(const apriltag_detection_t* det) {
   
   const apriltag_family_t* family = det->family;
   
@@ -52,7 +54,7 @@ image_u8_t* apriltag_vis_image(const apriltag_detection_t* det) {
 
 }
 
-matd_t* apriltag_vis_get_warp(const apriltag_detection_t* detection) {
+matd_t* apriltag_vis_warp(const apriltag_detection_t* detection) {
 
   double d = detection->family->d;
   double bb = detection->family->black_border;
@@ -103,4 +105,67 @@ matd_t* apriltag_vis_get_warp(const apriltag_detection_t* detection) {
   return result;
 
   
+}
+
+static inline int imin(int x, int y) {
+  return x < y ? x : y;
+}
+
+static inline int imax(int x, int y) {
+  return x > y ? x : y;
+}
+
+void apriltag_vis_rasterize(const apriltag_detection_t* detection,
+                            image_u8_t* image) {
+
+  // get points and homography
+  int x0 = image->width;
+  int x1 = 0;
+
+  int y0 = image->height;
+  int y1 = 0;
+
+  matd_t* warp = apriltag_vis_warp(detection);
+
+  image_u8_t* texture = apriltag_vis_texture(detection);
+  int size = texture->width;
+
+  int points[4][2] = {
+    { -1, -1 },
+    { -1, size },
+    { size, size },
+    { size, -1 }
+  };
+  
+  for (int i=0; i<4; ++i) {
+    double xi, yi;
+    homography_project(warp, points[i][0], points[i][1], &xi, &yi);
+    x0 = imin(x0, floor(xi));
+    x1 = imax(x1, ceil(xi));
+    y0 = imin(y0, floor(yi));
+    y1 = imax(y1, ceil(yi));
+  }
+
+  matd_t* warp_inv = matd_inverse(warp);
+  
+  uint8_t* rowptr = image->buf + y0*image->stride;
+  
+  for (int y=y0; y<y1; ++y) {
+    for (int x=x0; x<x1; ++x) {
+      double ox, oy;
+      homography_project(warp_inv, x+0.5, y+0.5, &ox, &oy);
+      int ix = (int)floor(ox+0.5);
+      int iy = (int)floor(oy+0.5);
+      if (ix >= 0 && ix < size && iy >= 0 && iy < size) {
+        rowptr[x] = texture->buf[iy*texture->stride + ix];
+      }
+    }
+    rowptr += image->stride;
+  }
+
+  image_u8_destroy(texture);
+  matd_destroy(warp);
+  matd_destroy(warp_inv);
+  
+
 }

@@ -107,7 +107,7 @@ def _matd_get_array(mat_ptr):
 
 DetectionBase = collections.namedtuple(
   'DetectionBase',
-  'tag_family, tag_id, hamming, goodness, decision_margin, '
+  'raw, tag_family, tag_id, hamming, goodness, decision_margin, '
   'homography, center, corners')
 
 class Detection(DetectionBase):
@@ -126,7 +126,7 @@ class Detection(DetectionBase):
 
     for i, label in enumerate(self._print_fields):
       
-      value = str(self[i])
+      value = str(self[i+1])
       
       if value.find('\n') > 0:
         value = value.split('\n')
@@ -249,6 +249,7 @@ class Detector:
       corners = numpy.ctypeslib.as_array(tag.p, shape=(4,2)).copy()
 
       d = Detection(
+        apriltag,
         tag.family.contents.name,
         tag.id,
         tag.hamming,
@@ -263,6 +264,18 @@ class Detector:
       
     return return_info
 
+
+  def detection_image(self, shape, detections):
+
+    height, width = shape[:2]
+    c_img = self.libc.image_u8_create(width, height)
+
+    for d in detections:
+      self.libc.apriltag_vis_rasterize(d.raw, c_img)
+
+    tmp = _image_u8_get_array(c_img)
+
+    return tmp[:, :width].copy()
 
   def add_tag_family(self, name):
 
@@ -290,14 +303,12 @@ class Detector:
 
     self.libc.apriltag_family_list.restype = ctypes.POINTER(_zarray)
 
-  def _convert_image(self, orig_img):
-    
-    self.img = orig_img
+    self.libc.apriltag_vis_rasterize.restype = None
 
-    if len(orig_img.shape) == 3:
-      img = numpy.array(Image.fromarray(orig_img).convert('L'))
-    else:
-      img = orig_img
+  def _convert_image(self, img):
+    
+    assert len(img.shape) == 2
+    assert img.dtype == numpy.uint8
 
     height = img.shape[0]
     width = img.shape[1]
@@ -323,19 +334,29 @@ def main():
   except ImportError:
     HAVE_CV2 = False
 
+  HAVE_CV2 = False
+
   if len(sys.argv) > 1:
-    pil_image = Image.open(sys.argv[1])
-    img = numpy.array(pil_image)
+    if HAVE_CV2:
+      orig = cv2.imread(sys.argv[1])
+      if len(orig.shape) == 3:
+        gray = cv2.cvtColor(orig, cv2.COLOR_RGB2GRAY)
+      else:
+        gray = orig
+    else:
+      pil_image = Image.open(sys.argv[1])
+      orig = numpy.array(pil_image)
+      gray = numpy.array(pil_image.convert('L'))
   else:
     print 'usage: {} IMAGE.png'
     sys.exit(0)
 
-  options = DetectorOptions(families='all',
+  options = DetectorOptions(families='tag36h11',
                             quad_contours=True)
   
   det = Detector(options)
 
-  detections = det.detect(img)
+  detections = det.detect(gray)
 
   num_detections = len(detections)
   print 'Detected {} tags.\n'.format(num_detections)
@@ -345,6 +366,22 @@ def main():
     print
     print d.tostring(indent=2)
     print
+
+  dimg = det.detection_image(gray.shape, detections)
+
+  if len(orig.shape) == 3:
+    dimg_color = dimg[:, :, None]
+    overlay = orig / 2 + dimg_color / 2
+  else:
+    overlay = gray / 2 + dimg / 2
+
+  if HAVE_CV2:
+    cv2.imshow('win', overlay)
+    while cv2.waitKey(5) < 0:
+      pass
+  else:
+    output = Image.fromarray(overlay)
+    output.save('detections.png')
     
 if __name__ == '__main__':
 
