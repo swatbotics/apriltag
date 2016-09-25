@@ -25,3 +25,5 @@ target_link_libraries(lm_test apriltag ${CMAKE_THREAD_LIBS_INIT} m)
 add_executable(pdf_test contrib/pdf_test.cpp)
 target_link_libraries(pdf_test apriltag ${CMAKE_THREAD_LIBS_INIT} m)
 
+install(TARGETS apriltag_demo DESTINATION bin)
+install(TARGETS apriltag DESTINATION lib)

@@ -14,6 +14,10 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${EXTRA_C_FLAGS}")
 set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR})
 set(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/lib)
 
+if(APPLE)
+  SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+endif(APPLE)
+
 add_subdirectory(core)
 include_directories(core core/common core/contrib)
 
@@ -24,3 +28,4 @@ if(OPENCV_FOUND)
   include_directories(${OPENCV_INCLUDE_DIRS})
   add_subdirectory(opencv)
 endif(OPENCV_FOUND)
+

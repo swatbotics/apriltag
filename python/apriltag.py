@@ -260,9 +260,20 @@ add_arguments; or an instance of the DetectorOptions class.'''
         else:
             extension = '.so' # TODO test on windows?
 
-        # load the C library and store it as a class variable
-        self.libc = ctypes.CDLL('./../build/lib/libapriltag'+extension)
+        filename = 'libapriltag'+extension
 
+
+        # load the C library and store it as a class variable
+        # note: prefer OS install to local!
+        try:
+            self.libc = ctypes.CDLL(filename)
+        except OSError:
+            selfdir = os.path.dirname(__file__)
+            relpath = os.path.join(selfdir, '../build/lib/', filename)
+            if not os.path.exists(relpath):
+                raise
+            self.libc = ctypes.CDLL(relpath)
+            
         # declare return types of libc function
         self._declare_return_types()
 
