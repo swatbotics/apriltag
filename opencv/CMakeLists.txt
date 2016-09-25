@@ -1,4 +1,6 @@
-add_library(apriltag_opencv apriltag_opencv.cpp)
+add_library(apriltag_opencv SHARED apriltag_opencv.cpp)
+target_link_libraries(apriltag_opencv apriltag
+  ${CMAKE_THREAD_LIBS_INIT} ${OPENCV_LDFLAGS} m)
 
 add_executable(apriltag_opencv_demo apriltag_opencv_demo.cpp)
 target_link_libraries(apriltag_opencv_demo apriltag
