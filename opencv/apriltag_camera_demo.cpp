@@ -1,8 +1,8 @@
 #include "apriltag_opencv.h"
 #include "apriltag_family.h"
 #include "getopt.h"
-#include <opencv2/highgui.hpp>
-#include <opencv2/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
 
 int main(int argc, char** argv) {
 
