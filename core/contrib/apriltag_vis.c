@@ -129,6 +129,12 @@ void apriltag_vis_detection(const apriltag_detection_t* detection,
     y1 = imax(y1, ceil(yi));
   }
 
+  x0 = imax(x0, 0);
+  x1 = imin(x1, image->width);
+
+  y0 = imax(y0, 0);
+  y1 = imin(y1, image->height);
+
   matd_t* warp_inv = matd_inverse(warp);
   
   uint8_t* rowptr = image->buf + y0*image->stride;
