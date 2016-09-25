@@ -430,6 +430,9 @@ static inline int lines_from_corners_fast(const struct quad* q,
     double dy = sides[i][1];
     
     double d = sqrt(dx*dx + dy*dy);
+    if (!d) { // prevent divide by 0
+      return 0;
+    }
 
     lines[i].u[0] = dx / d;
     lines[i].u[1] = dy / d;
@@ -485,6 +488,8 @@ static inline int lines_from_corners_contour(const apriltag_detector_t* td,
     zarray_destroy(outer);
 
     if ((mean_outer - mean_inner) < td->qcp.contour_margin) {
+      return 0;
+    } else if (!moments.n) {
       return 0;
     } else {
       line_init_from_xyw(&moments, lines+i);
@@ -575,7 +580,8 @@ static inline int quad_from_contour(const apriltag_detector_t* td,
   for (int i=0; i<4; ++i) {
     int j = (i+1)&3; 
     double p[2];
-    g2d_line_intersect_line(lines+i, lines+j, p);
+    int result = g2d_line_intersect_line(lines+i, lines+j, p);
+    if (!result) { return 5; }
     q->p[i][0] = p[0];
     q->p[i][1] = p[1];
   }
