@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+
 """Python wrapper for C version of apriltags. This program creates two
 classes that are used to detect apriltags and extract information from
 them. Using this module, you can identify all apriltags visible in an

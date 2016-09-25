@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 '''Demonstrate Python wrapper of C apriltag library by running on camera frames.'''
 
 from argparse import ArgumentParser
