@@ -141,7 +141,7 @@ class Detection(DetectionBase):
   def __str__(self):
     return self.tostring()
 
-######################################################################
+######################################################################  
   
 class DetectorOptions:
 
@@ -169,6 +169,51 @@ class DetectorOptions:
     self.debug = int(debug)
     self.quad_contours = quad_contours
 
+######################################################################
+
+def add_arguments(parser):
+
+  defaults = DetectorOptions()
+
+  show_default = ' (default %(default)s)'
+  
+  parser.add_argument('-f', metavar='FAMILIES',
+                      dest='families', default=defaults.families,
+                      help='Tag families' + show_default)
+  
+  parser.add_argument('-B', metavar='N',
+                      dest='border', type=int, default=defaults.border,
+                      help='Tag border size in pixels' + show_default)
+
+  parser.add_argument('-t', metavar='N',
+                      dest='nthreads', type=int, default=defaults.nthreads,
+                      help='Number of threads' + show_default)
+
+  parser.add_argument('-x', metavar='SCALE',
+                      dest='quad_decimate', type=float, default=defaults.quad_decimate,
+                      help='Quad decimation factor' + show_default)
+
+  parser.add_argument('-b', metavar='SIGMA',
+                      dest='quad_sigma', type=float, default=defaults.quad_sigma,
+                      help='Apply low-pass blur to input' + show_default)
+
+  parser.add_argument('-0', dest='refine_edges', default=True,
+                      action='store_false',
+                      help='Spend less time trying to align edges of tags')
+
+  parser.add_argument('-1', dest='refine_decode', default=False,
+                      action='store_true',
+                      help='Spend more time trying to decode tags')
+                        
+  parser.add_argument('-2', dest='refine_pose', default=False,
+                      action='store_true',
+                      help='Spend more time trying to precisely localize tags')
+
+  parser.add_argument('-c', dest='quad_contours', default=False,
+                      action='store_true',
+                      help='Use new contour-based quad detection')
+
+    
 ######################################################################    
                
 class Detector:
@@ -324,6 +369,7 @@ class Detector:
 def main():
 
   import sys
+  from argparse import ArgumentParser
 
   try:
     import cv2
@@ -331,7 +377,20 @@ def main():
   except ImportError:
     HAVE_CV2 = False
 
-  if len(sys.argv) > 1:
+  parser = ArgumentParser(
+    description='test apriltag Python bindings')
+
+  parser.add_argument('filenames', metavar='IMAGE', nargs='+',
+                      help='files to convert')
+  
+  add_arguments(parser)
+
+  options = parser.parse_args()
+
+  det = Detector(options)
+  
+  for filename in options.filenames:
+    
     if HAVE_CV2:
       orig = cv2.imread(sys.argv[1])
       if len(orig.shape) == 3:
@@ -342,38 +401,31 @@ def main():
       pil_image = Image.open(sys.argv[1])
       orig = numpy.array(pil_image)
       gray = numpy.array(pil_image.convert('L'))
-  else:
-    print 'usage: {} IMAGE.png'
-    sys.exit(0)
 
-  options = DetectorOptions(families='tag36h11')
-  
-  det = Detector(options)
+    detections, dimg = det.detect(gray, return_image=True)
 
-  detections, dimg = det.detect(gray, return_image=True)
+    num_detections = len(detections)
+    print 'Detected {} tags.\n'.format(num_detections)
 
-  num_detections = len(detections)
-  print 'Detected {} tags.\n'.format(num_detections)
+    for i, d in enumerate(detections):
+      print 'Detection {} of {}:'.format(i+1, num_detections)
+      print
+      print d.tostring(indent=2)
+      print
 
-  for i, d in enumerate(detections):
-    print 'Detection {} of {}:'.format(i+1, num_detections)
-    print
-    print d.tostring(indent=2)
-    print
+    if len(orig.shape) == 3:
+      dimg_color = dimg[:, :, None]
+      overlay = orig / 2 + dimg_color / 2
+    else:
+      overlay = gray / 2 + dimg / 2
 
-  if len(orig.shape) == 3:
-    dimg_color = dimg[:, :, None]
-    overlay = orig / 2 + dimg_color / 2
-  else:
-    overlay = gray / 2 + dimg / 2
-
-  if HAVE_CV2:
-    cv2.imshow('win', overlay)
-    while cv2.waitKey(5) < 0:
-      pass
-  else:
-    output = Image.fromarray(overlay)
-    output.save('detections.png')
+    if HAVE_CV2:
+      cv2.imshow('win', overlay)
+      while cv2.waitKey(5) < 0:
+        pass
+    else:
+      output = Image.fromarray(overlay)
+      output.save('detections.png')
     
 if __name__ == '__main__':
 
