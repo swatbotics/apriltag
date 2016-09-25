@@ -72,10 +72,7 @@ inline image_u8_t cv2im8(cv::Mat m) {
     exit(1);
   }
   
-  image_u8_t tmp = { .width = m.cols,
-                     .height = m.rows,
-                     .stride = m.cols,
-                     .buf = (uint8_t*)m.data };
+  image_u8_t tmp = { m.cols, m.rows, m.cols, (uint8_t*)m.data };
 
   return tmp;
 
@@ -88,10 +85,7 @@ inline image_u32_t cv2im32(cv::Mat m) {
     exit(1);
   }
 
-  image_u32_t tmp = { .width = m.cols,
-                      .height = m.rows,
-                      .stride = m.cols,
-                      .buf = (uint32_t*)m.data };
+  image_u32_t tmp = { m.cols, m.rows, m.cols, (uint32_t*)m.data };
 
   return tmp;
 
