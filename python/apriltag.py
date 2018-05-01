@@ -442,7 +442,7 @@ def main():
         if have_cv2:
             orig = cv2.imread(filename)
             if len(orig.shape) == 3:
-                gray = cv2.cvtColor(orig, cv2.COLOR_RGB2GRAY)
+                gray = cv2.cvtColor(orig, cv2.COLOR_BGR2GRAY)
             else:
                 gray = orig
         else:
@@ -462,9 +462,9 @@ def main():
             print()
 
         if len(orig.shape) == 3:
-            overlay = orig / 2 + dimg[:, :, None] / 2
+            overlay = orig // 2 + dimg[:, :, None] // 2
         else:
-            overlay = gray / 2 + dimg / 2
+            overlay = gray // 2 + dimg // 2
 
         if have_cv2:
             cv2.imshow('win', overlay)
