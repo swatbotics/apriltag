@@ -146,7 +146,7 @@ tuple class.
         return '\n'.join(rval)
 
     def __str__(self):
-        return self.tostring()
+        return self.tostring().encode('ascii')
 
 ######################################################################
 
@@ -274,7 +274,7 @@ add_arguments; or an instance of the DetectorOptions class.'''
             if not os.path.exists(relpath):
                 raise
             self.libc = ctypes.CDLL(relpath)
-            
+
         # declare return types of libc function
         self._declare_return_types()
 
@@ -365,13 +365,13 @@ image of type numpy.uint8.'''
 
         '''Add a single tag family to this detector.'''
 
-        family = self.libc.apriltag_family_create(name)
+        family = self.libc.apriltag_family_create(name.encode('ascii'))
 
         if family:
             family.contents.border = self.options.border
             self.libc.apriltag_detector_add_family(self.tag_detector, family)
         else:
-            print 'Unrecognized tag family name. Try e.g. tag36h11'
+            print('Unrecognized tag family name. Try e.g. tag36h11')
 
     def _vis_detections(self, shape, detections):
 
@@ -453,13 +453,13 @@ def main():
         detections, dimg = det.detect(gray, return_image=True)
 
         num_detections = len(detections)
-        print 'Detected {} tags.\n'.format(num_detections)
+        print('Detected {} tags.\n'.format(num_detections))
 
         for i, detection in enumerate(detections):
-            print 'Detection {} of {}:'.format(i+1, num_detections)
-            print
-            print detection.tostring(indent=2)
-            print
+            print( 'Detection {} of {}:'.format(i+1, num_detections))
+            print()
+            print( detection.tostring(indent=2))
+            print()
 
         if len(orig.shape) == 3:
             overlay = orig / 2 + dimg[:, :, None] / 2
@@ -477,4 +477,3 @@ def main():
 if __name__ == '__main__':
 
     main()
-
