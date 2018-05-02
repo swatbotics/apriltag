@@ -10,6 +10,8 @@ Original author: Isaac Dulin, Spring 2016
 Updates: Matt Zucker, Fall 2016
 
 """
+from __future__ import division
+from __future__ import print_function
 
 import ctypes
 import collections
