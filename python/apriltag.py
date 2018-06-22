@@ -460,7 +460,7 @@ def main():
         if have_cv2:
             orig = cv2.imread(filename)
             if len(orig.shape) == 3:
-                gray = cv2.cvtColor(orig, cv2.COLOR_BGR2GRAY)
+                gray = cv2.cvtColor(orig, cv2.COLOR_RGB2GRAY)
             else:
                 gray = orig
         else:
