@@ -37,6 +37,10 @@ zarray_t* apriltag_family_list() {
   
 }
 
+void apriltag_family_list_destroy(zarray_t* za) {
+    zarray_destroy(za);
+}
+
 apriltag_family_t* apriltag_family_create(const char* famname) {
 
   int i;

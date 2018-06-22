@@ -299,6 +299,8 @@ add_arguments; or an instance of the DetectorOptions class.'''
             self.libc.zarray_get(flist, i, ctypes.byref(ptr))
             self.families.append(ctypes.string_at(ptr))
 
+        self.libc.apriltag_family_list_destroy(flist)
+
         if options.families == 'all':
             families_list = self.families
         elif isinstance(options.families, list):
@@ -309,6 +311,10 @@ add_arguments; or an instance of the DetectorOptions class.'''
         # add tags
         for family in families_list:
             self.add_tag_family(family)
+
+    def __del__(self):
+        self.libc.apriltag_detector_destroy(self.tag_detector)
+
 
     def detect(self, img, return_image=False):
 
@@ -339,7 +345,7 @@ image of type numpy.uint8.'''
             corners = numpy.ctypeslib.as_array(tag.p, shape=(4, 2)).copy()
 
             detection = Detection(
-                tag.family.contents.name,
+                ctypes.string_at(tag.family.contents.name),
                 tag.id,
                 tag.hamming,
                 tag.goodness,
@@ -351,14 +357,22 @@ image of type numpy.uint8.'''
             #Append this dict to the tag data array
             return_info.append(detection)
 
+
         if return_image:
 
+            print('visualizing detections...')
             dimg = self._vis_detections(img.shape, detections)
-            return return_info, dimg
+
+            
+            rval = return_info, dimg
 
         else:
 
-            return return_info
+            rval = return_info
+
+        self.libc.apriltag_detections_destroy(detections)
+
+        return rval
 
 
     def add_tag_family(self, name):
@@ -407,6 +421,8 @@ image of type numpy.uint8.'''
         # tmp goes out of scope here but we don't care because
         # the underlying data is still in c_img.
         return c_img
+
+        
 
 ######################################################################
 
