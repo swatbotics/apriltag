@@ -272,9 +272,13 @@ add_arguments; or an instance of the DetectorOptions class.'''
             self.libc = ctypes.CDLL(filename)
         except OSError:
             selfdir = os.path.dirname(__file__)
+            print('selfdir is', selfdir)
             relpath = os.path.join(selfdir, '../build/lib/', filename)
             if not os.path.exists(relpath):
-                raise
+                relpath = os.path.join(os.getcwd(), '../build/lib', filename)
+                if not os.path.exists(relpath):
+                    raise
+            
             self.libc = ctypes.CDLL(relpath)
 
         # declare return types of libc function
@@ -328,16 +332,16 @@ image of type numpy.uint8.'''
 
         c_img = self._convert_image(img)
 
+        return_info = []
+
         #detect apriltags in the image
         detections = self.libc.apriltag_detector_detect(self.tag_detector, c_img)
 
-        #create a pytags_info object
-        return_info = []
-
+        apriltag = ctypes.POINTER(_ApriltagDetection)()
+        
         for i in range(0, detections.contents.size):
 
             #extract the data for each apriltag that was identified
-            apriltag = ctypes.POINTER(_ApriltagDetection)()
             self.libc.zarray_get(detections, i, ctypes.byref(apriltag))
 
             tag = apriltag.contents
@@ -359,13 +363,11 @@ image of type numpy.uint8.'''
             #Append this dict to the tag data array
             return_info.append(detection)
 
+        self.libc.image_u8_destroy(c_img)
 
         if return_image:
 
-            print('visualizing detections...')
             dimg = self._vis_detections(img.shape, detections)
-
-            
             rval = return_info, dimg
 
         else:
@@ -396,7 +398,11 @@ image of type numpy.uint8.'''
         self.libc.apriltag_vis_detections(detections, c_dimg)
         tmp = _image_u8_get_array(c_dimg)
 
-        return tmp[:, :width].copy()
+        rval = tmp[:, :width].copy()
+
+        self.libc.image_u8_destroy(c_dimg)
+
+        return rval
 
     def _declare_return_types(self):
 
@@ -428,6 +434,8 @@ image of type numpy.uint8.'''
 
 ######################################################################
 
+# tell memory_profile we are interested in this function
+@profile 
 def main():
 
     '''Test function for this Python wrapper.'''
@@ -437,23 +445,36 @@ def main():
     # for some reason pylint complains about members being undefined :(
     # pylint: disable=E1101
 
-    try:
-        import cv2
-        have_cv2 = True
-    except ImportError:
-        have_cv2 = False
-        from PIL import Image
-
     parser = ArgumentParser(
         description='test apriltag Python bindings')
 
     parser.add_argument('filenames', metavar='IMAGE', nargs='+',
                         help='files to convert')
 
+    parser.add_argument('-n', '--no-gui', action='store_true',
+                        help='suppress OpenCV gui')
+
+    parser.add_argument('-d', '--debug-images', action='store_true',
+                        help='output debug detection image')
+
     add_arguments(parser)
 
     options = parser.parse_args()
     det = Detector(options)
+
+    use_gui = not options.no_gui
+    have_cv2 = False
+
+    if use_gui:
+        try:
+            import cv2
+            have_cv2 = True
+        except:
+            use_gui = False
+            print('suppressing GUI because cv2 module not found')
+
+    if not have_cv2:
+        from PIL import Image
 
     for filename in options.filenames:
 
@@ -484,14 +505,16 @@ def main():
         else:
             overlay = gray // 2 + dimg // 2
 
-        if have_cv2:
+        if options.debug_images:
+            output = Image.fromarray(overlay)
+            output.save('detections.png')
+            
+        if use_gui:
             cv2.imshow('win', overlay)
             while cv2.waitKey(5) < 0:
                 pass
-        else:
-            output = Image.fromarray(overlay)
-            output.save('detections.png')
+
 
 if __name__ == '__main__':
-
     main()
+
