@@ -37,6 +37,7 @@ extern "C" {
 #endif
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "common/matd.h"
 #include "common/image_u8.h"
