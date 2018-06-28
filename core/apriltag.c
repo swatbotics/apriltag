@@ -1380,6 +1380,7 @@ zarray_t *apriltag_detector_detect(apriltag_detector_t *td, image_u8_t *im_orig)
 
     zarray_sort(detections, detection_compare_function);
     timeprofile_stamp(td->tp, "cleanup");
+    image_u8_destroy(im_orig); //fix memory leak
 
     return detections;
 }
