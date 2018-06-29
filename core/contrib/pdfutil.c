@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <math.h>
+#include <setjmp.h>
 
 enum pdf_object_type {
   PDF_OBJECT_NULL=0,
@@ -63,6 +64,11 @@ typedef struct pdf_toplevel_object {
   pdf_object_t* object;
 } pdf_toplevel_object_t;
 
+typedef struct pdf_gstate {
+  pdf_stroke_t stroke;
+  pdf_fill_t fill;
+} pdf_gstate_t;
+
 struct pdf {
   int is_finished;
   pdf_refspec_t pages_ref;   
@@ -73,6 +79,7 @@ struct pdf {
   pdf_object_t* cur_page_fonts;
   zarray_t* toplevel_objects; // of pdf_toplevel_object_t*
   pdf_refspec_t fonts[14];
+  zarray_t* gstate;
 };
 
 int pdf_objects_equal(const pdf_object_t* a,
@@ -462,10 +469,14 @@ typedef struct pdf_writer {
   pdf_write_callback callback;
   void* userdata;
   size_t bytes_written;
+    jmp_buf env;
 } pdf_writer_t;
 
 void pdf_write(pdf_writer_t* w, size_t len, const char* data) {
-  w->callback(len, data, w->userdata);
+  int status = w->callback(len, data, w->userdata);
+  if (status != 0) {
+      
+  }
   w->bytes_written += len;
 }
 
@@ -588,7 +599,7 @@ void pdf_write_object(pdf_writer_t* w, pdf_object_t* o) {
 
 }
 
-void pdf_write_full(pdf_writer_t* w, pdf_t* pdf) {
+int pdf_write_full(pdf_writer_t* w, pdf_t* pdf) {
 
   size_t nobj = zarray_size(pdf->toplevel_objects);
   size_t toplevel_offsets[nobj];
@@ -640,14 +651,46 @@ void pdf_write_full(pdf_writer_t* w, pdf_t* pdf) {
   snprintf(buf, 1024, "%d\n", (int)xref_start);
   pdf_write_str(w, buf);
   pdf_write_str(w, "%%EOF\n");
+
+  return 0;
   
 }
+void pdf_finish_page(pdf_t* pdf) {
+    
+  // deal with anything left on this page
+  if (pdf->cur_page) {
+      if (zarray_size(pdf->gstate) > 1) {
+          fprintf(stderr, "warning: the graphics state stack was unbalanced in pdf_end_page\n");
+          while (zarray_size(pdf->gstate) > 1) {
+              pdf_gstate_pop(pdf);
+          }
+      }
+  }
 
+}
+
+pdf_gstate_t* pdf_cur_gstate(pdf_t* pdf) {
+
+    pdf_gstate_t* cur_gstate;
+
+    zarray_get_volatile(pdf->gstate, zarray_size(pdf->gstate)-1, &cur_gstate);
+
+    return cur_gstate;
+
+}
 
 void pdf_end_page(pdf_t* pdf) {
 
-  // TODO: deal with anything left on this page
+  pdf_finish_page(pdf);
 
+  pdf_gstate_t* base_gstate = pdf_cur_gstate(pdf);
+
+  pdf_stroke_t old_stroke = base_gstate->stroke;
+  base_gstate->stroke = pdf_default_stroke(0, 0, 0);
+
+  pdf_fill_t old_fill = base_gstate->fill;
+  base_gstate->fill = pdf_default_fill(0, 0, 0);
+  
   //////////////////////////////////////////////////
   // now create the new page
 
@@ -669,6 +712,11 @@ void pdf_end_page(pdf_t* pdf) {
   pdf_dict_insert_str(pdf->cur_page, "Contents", pdf_reference_create(contents_ref));
 
   pdf->cur_page_fonts = NULL;
+
+  pdf_set_stroke(pdf, &old_stroke);
+  pdf_set_fill(pdf, &old_fill);
+  
+
 
 }
 
@@ -701,6 +749,13 @@ pdf_t* pdf_create(double width, double height) {
   pdf_dict_insert_str(pagesdict, "Count", pdf->page_count);
   pdf_dict_insert_str(pagesdict, "MediaBox", make_rect(0, 0, width, height));
 
+  pdf->gstate = zarray_create(sizeof(pdf_gstate_t));
+
+  pdf_gstate_t base_gstate;
+  base_gstate.stroke = pdf_default_stroke(0, 0, 0);
+  base_gstate.fill = pdf_default_fill(0, 0, 0);
+  zarray_add(pdf->gstate, &base_gstate);
+
   pdf_end_page(pdf);
 
   return pdf;
@@ -718,38 +773,65 @@ void pdf_destroy(pdf_t* pdf) {
 
   zarray_destroy(pdf->toplevel_objects);
 
+  zarray_destroy(pdf->gstate);
+
   free(pdf);
   
 }
 
-void pdf_stream_write(size_t len,
-                      const char* data,
-                      void* s) {
-
+int pdf_stream_write(size_t len,
+                     const char* data,
+                     void* s) {
+    
   pdf_object_t* stream  = (pdf_object_t*)s;
 
   pdf_stream_append(stream, len, data);
 
+  return 0;
+
 }
 
-void pdf_file_write(size_t len,
+int pdf_file_write(size_t len,
                     const char* data,
                     void* fp) {
-
-  fwrite(data, len, 1, (FILE*)fp);
+    
+    return fwrite(data, len, 1, (FILE*)fp);
   
 }
 
 
-void pdf_save_stream(pdf_t* pdf,
+int pdf_save_stream(pdf_t* pdf,
                      pdf_write_callback cbk,
                      void* userdata) {
 
+    pdf_finish_page(pdf);
+
   pdf_writer_t w = { cbk, userdata, 0 };
+  
+  int status = setjmp(w.env);
 
-  pdf_write_full(&w, pdf);
+  if (status != 0) {
+      return status;
+  }
 
+  return pdf_write_full(&w, pdf);
+  
 }
+
+int pdf_save(pdf_t* pdf,
+             const char* filename) {
+
+    FILE* fp = fopen(filename, "wb");
+    if (!fp) { return -1; }
+    
+    int status = pdf_save_stream(pdf, pdf_file_write, fp);
+    
+    fclose(fp);
+
+    return status;
+    
+}
+
 
 const char* pdf_font_name(pdf_font_t font) {
   switch (font) {
@@ -815,6 +897,13 @@ void pdf_stream_append_real(pdf_object_t* s, double val) {
   pdf_stream_append_object(s, &o);
 }
 
+void pdf_stream_append_reals(pdf_object_t* s, const double* vals, int count) {
+    for (int i=0; i<count; ++i) {
+        if (i) { pdf_stream_append_str(s, " "); }
+        pdf_stream_append_real(s, vals[i]);
+    }
+}
+
 void pdf_stream_append_name(pdf_object_t* s, const char* val) {
   pdf_object_t o;
   o.type = PDF_OBJECT_NAME;
@@ -854,6 +943,7 @@ void pdf_image_gray(pdf_t* pdf,
   pdf_dict_insert_str(idict, "Width", pdf_integer_create(image->width));
   pdf_dict_insert_str(idict, "Height", pdf_integer_create(image->height));
   pdf_dict_insert_str(idict, "ColorSpace", pdf_name_create_str("DeviceGray"));
+  pdf_dict_insert_str(idict, "Interpolate", pdf_boolean_create(0));
   pdf_dict_insert_str(idict, "BitsPerComponent", pdf_integer_create(8));
 
   pdf_object_t* xobj = pdf_stream_create();
@@ -884,21 +974,16 @@ void pdf_image_gray(pdf_t* pdf,
   snprintf(oname, 1024, "Im%d", zarray_size(xdict->dict)+1);
 
   pdf_dict_insert_str(xdict, oname, pdf_reference_create(r));
-  
+
+  double cm[6] = {
+      samples_per_pt*image->width, 0,
+      0, samples_per_pt*image->height,
+      x, y
+  };
   
   pdf_cur_page_newline(pdf);
   pdf_stream_append_str(pdf->cur_page_contents, "q ");
-  pdf_stream_append_real(pdf->cur_page_contents, samples_per_pt*image->width);
-  pdf_stream_append_str(pdf->cur_page_contents, " ");
-  pdf_stream_append_real(pdf->cur_page_contents, 0);
-  pdf_stream_append_str(pdf->cur_page_contents, " ");
-  pdf_stream_append_real(pdf->cur_page_contents, 0);
-  pdf_stream_append_str(pdf->cur_page_contents, " ");
-  pdf_stream_append_real(pdf->cur_page_contents, samples_per_pt*image->height);
-  pdf_stream_append_str(pdf->cur_page_contents, " ");
-  pdf_stream_append_real(pdf->cur_page_contents, x);
-  pdf_stream_append_str(pdf->cur_page_contents, " ");
-  pdf_stream_append_real(pdf->cur_page_contents, y);
+  pdf_stream_append_reals(pdf->cur_page_contents, cm, 6);
   pdf_stream_append_str(pdf->cur_page_contents, " cm ");
   pdf_stream_append_name(pdf->cur_page_contents, oname);
   pdf_stream_append_str(pdf->cur_page_contents, " Do ");
@@ -960,9 +1045,256 @@ void pdf_text(pdf_t* pdf, pdf_font_t font,
 
 }
 
+void pdf_path_rect(zarray_t* path, double x, double y, double w, double h) {
+    pdf_path_element_t element = { PDF_PATH_TYPE_RECT, { x, y, w, h } };
+    zarray_add(path, &element);
+}
+
+void pdf_path_move_to(zarray_t* path, double x, double y) {
+    pdf_path_element_t element = { PDF_PATH_TYPE_MOVETO, { x, y } };
+    zarray_add(path, &element);
+}
+
+void pdf_path_line_to(zarray_t* path, double x, double y) {
+    pdf_path_element_t element = { PDF_PATH_TYPE_LINETO, { x, y } };
+    zarray_add(path, &element);
+}
+
+void pdf_path_close(zarray_t* path) {
+    pdf_path_element_t element = { PDF_PATH_TYPE_CLOSE, { 0, 0 } };
+    zarray_add(path, &element);
+}
+
+void pdf_set_color(pdf_t* pdf,
+                   double cur_rgb[3],
+                   const double new_rgb[3],
+                   const char* op) {
+    
+    size_t sz = sizeof(double)*3;
+
+
+    if (memcmp(cur_rgb, new_rgb, sz) == 0) { return; }
+
+    pdf_cur_page_newline(pdf);
+    pdf_stream_append_reals(pdf->cur_page_contents, new_rgb, 3);
+    pdf_stream_append_str(pdf->cur_page_contents, op);
+    memcpy(cur_rgb, new_rgb, sz);
+
+}
+
     
 
+void pdf_set_stroke(pdf_t* pdf,
+                    const pdf_stroke_t* s_new) {
+
+    pdf_gstate_t* cur_gstate = pdf_cur_gstate(pdf);
+    pdf_stroke_t* s_cur = &cur_gstate->stroke;
+
+    pdf_set_color(pdf,
+                  s_cur->color_rgb,
+                  s_new->color_rgb,
+                  " RG\n");
+    
+    if (s_new->width != s_cur->width) {
+        pdf_cur_page_newline(pdf);
+        pdf_stream_append_real(pdf->cur_page_contents, s_new->width);
+        pdf_stream_append_str(pdf->cur_page_contents, " w ");
+        s_cur->width = s_new->width;
+    }
+    
+    if (s_new->cap != s_cur->cap) {
+        pdf_cur_page_newline(pdf);
+        pdf_stream_append_integer(pdf->cur_page_contents, (int)s_new->cap);
+        pdf_stream_append_str(pdf->cur_page_contents, " J ");
+        s_cur->cap = s_new->cap;
+    }
+    
+    if (s_new->join != s_cur->join) {
+        pdf_cur_page_newline(pdf);
+        pdf_stream_append_integer(pdf->cur_page_contents, (int)s_new->join);
+        pdf_stream_append_str(pdf->cur_page_contents, " j\n");
+        s_cur->join = s_new->join;
+    }
+    
+}
+
+void pdf_set_fill(pdf_t* pdf,
+                  const pdf_fill_t* f_new) {
+
+    pdf_gstate_t* cur_gstate = pdf_cur_gstate(pdf);
+    pdf_fill_t* f_cur = &cur_gstate->fill;
+
+    pdf_set_color(pdf,
+                  f_cur->color_rgb,
+                  f_new->color_rgb,
+                  " rg\n");
+
+}
+
+void pdf_path_draw(pdf_t* pdf,
+                   zarray_t* path,
+                   pdf_stroke_type_t stroke_type,
+                   pdf_fill_type_t fill_type) {
+
+    if (stroke_type == PDF_STROKE_NONE &&
+        fill_type == PDF_FILL_NONE) {
+        return;
+    }
+
+    pdf_cur_page_newline(pdf);
+
+    for (int i=0; i<zarray_size(path); ++i) {
+
+        pdf_path_element_t element;
+        zarray_get(path, i, &element);
+
+        if (i) {
+            pdf_stream_append_str(pdf->cur_page_contents, " ");
+        }
+
+        switch (element.type) {
+        case PDF_PATH_TYPE_RECT:
+            pdf_stream_append_reals(pdf->cur_page_contents, element.xydata, 4);
+            pdf_stream_append_str(pdf->cur_page_contents, " re");
+            break;
+        case PDF_PATH_TYPE_MOVETO:
+        case PDF_PATH_TYPE_LINETO:
+            pdf_stream_append_reals(pdf->cur_page_contents, element.xydata, 2);
+            pdf_stream_append_str(pdf->cur_page_contents,
+                                  (element.type == PDF_PATH_TYPE_MOVETO ? " m" : " l"));
+            break;
+        case PDF_PATH_TYPE_CLOSE:
+            pdf_stream_append_str(pdf->cur_page_contents, "h");
+            break;
+        default:
+            fprintf(stderr, "warning pdf path element %d has invalid type %d\n",
+                    i, (int)element.type);
+            break;
+        }
+        
+    }
+
+    const char* op = NULL;
+
+    if (stroke_type == PDF_STROKE_CLOSED) { // closed stroke
+        if (fill_type == PDF_FILL_NONZERO) {
+            op = "b";
+        } else if (fill_type == PDF_FILL_EVENODD) {
+            op = "b*";
+        } else  {
+            op = "s";
+        }
+    } else if (stroke_type == PDF_STROKE_REGULAR) {
+        if (fill_type == PDF_FILL_NONZERO) {
+            op = "B";
+        } else if (fill_type == PDF_FILL_EVENODD) {
+            op = "B*";
+        } else { // unclosed stroke only
+            op = "S";
+        }
+    } else { // fill only
+        if (fill_type == PDF_FILL_NONZERO) {
+            op = "f";
+        } else {
+            op = "f*";
+        }
+    }
+
+    pdf_stream_append_str(pdf->cur_page_contents, " ");
+    pdf_stream_append_str(pdf->cur_page_contents, op);
+
+    pdf_path_destroy(path);
+    
+}
+
+void pdf_set_rgb(double rgb[3], double r, double g, double b) {
+    rgb[0] = r;
+    rgb[1] = g;
+    rgb[2] = b;
+}
 
 
+pdf_stroke_t pdf_default_stroke(double r, double g, double b) {
+    
+    static pdf_stroke_t stroke = {
+        { 0, 0, 0 },
+        1.0,
+        PDF_CAP_BUTT,
+        PDF_JOIN_MITER,
+    };
 
+    pdf_set_rgb(stroke.color_rgb, r, g, b);
+
+    return stroke;
+
+}
+        
+pdf_fill_t pdf_default_fill(double r, double g, double b) {
+
+    static pdf_fill_t fill = {
+        { 0, 0, 0 },
+    };
+
+    pdf_set_rgb(fill.color_rgb, r, g, b);
+
+    return fill;
+
+}
+    
+zarray_t* pdf_path_create() {
+    return zarray_create(sizeof(pdf_path_element_t));
+}
+
+zarray_t* pdf_path_copy(zarray_t* path) {
+    return zarray_copy(path);
+}
+
+void pdf_path_destroy(zarray_t* path) {
+    zarray_destroy(path);
+}
+
+
+void pdf_gstate_push(pdf_t* pdf);
+void pdf_gstate_pop(pdf_t* pdf);
+
+void pdf_ctm_concat(pdf_t* pdf,
+                    double xx, double yx, 
+                    double xy, double yy,
+                    double tx, double ty) {
+
+    double cm[6] = {
+        xx, yx,
+        xy, yy,
+        tx, ty
+    };
+
+    pdf_cur_page_newline(pdf);
+    pdf_stream_append_reals(pdf->cur_page_contents, cm, 6); 
+    pdf_stream_append_str(pdf->cur_page_contents, " cm");
+   
+}
+
+void pdf_gstate_push(pdf_t* pdf) {
+
+    pdf_cur_page_newline(pdf);
+    pdf_stream_append_str(pdf->cur_page_contents, "q");
+
+    pdf_gstate_t* cur_gstate = pdf_cur_gstate(pdf);
+    zarray_add(pdf->gstate, &cur_gstate);
+    
+}
+
+void pdf_gstate_pop(pdf_t* pdf) {
+
+    if (zarray_size(pdf->gstate) <= 1) {
+        fprintf(stderr, "warning: unbalanced gstate stack in pdf_gstate_pop!\n");
+    } else {
+        zarray_truncate(pdf->gstate,
+                        zarray_size(pdf->gstate)-1);
+    }
+    
+    pdf_cur_page_newline(pdf);
+    pdf_stream_append_str(pdf->cur_page_contents, "Q");
+    
+}
 

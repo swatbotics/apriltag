@@ -69,11 +69,37 @@ int main(int argc, char** argv) {
 
   pdf_image_gray(pdf, 1, 50, 50, gray);
 
+  double x = 150;
+
+  pdf_stroke_t stroke = pdf_default_stroke(1, 0, 1);
+  pdf_fill_t fill = pdf_default_fill(0, 1, 0);
+  
+  pdf_set_fill(pdf, &fill);
+
+  for (int i=0; i<3; ++i) {
+
+      zarray_t* path = pdf_path_create();
+
+      pdf_path_move_to(path, x, 50);
+      pdf_path_line_to(path, x+30, 50);
+      pdf_path_line_to(path, x+30, 80);
+
+      stroke.width = 1 + 4*i;
+
+      pdf_set_stroke(pdf, &stroke);
+
+      pdf_path_draw(pdf, path, PDF_STROKE_REGULAR, PDF_FILL_NONZERO);
+
+      x += 40;
+
+  }
+
   pdf_save_stream(pdf, pdf_file_write, stdout);
   
   pdf_destroy(pdf);
   image_u8_destroy(gray);
   image_u32_destroy(rgb);
+
 
   
   return 0;

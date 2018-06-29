@@ -5,8 +5,18 @@
 image_u8_t* apriltag_vis_texture(const apriltag_detection_t* det) {
   
   const apriltag_family_t* family = det->family;
+  int wb = 1;
+  uint8_t fg = 255;
+  uint8_t bg = 0;
   
-  const uint32_t wb = 1;
+  return apriltag_vis_texture2(det->family, family->codes[det->id],
+                               wb, fg, bg);
+
+}
+
+image_u8_t* apriltag_vis_texture2(const apriltag_family_t* family,
+                                  uint64_t code, uint32_t wb, uint8_t fg, uint8_t bg) {
+
   const uint32_t bb = family->black_border;
   const uint32_t tb = wb + bb;
 
@@ -14,8 +24,6 @@ image_u8_t* apriltag_vis_texture(const apriltag_detection_t* det) {
 
   uint32_t size = 2*tb + d;
 
-  const uint8_t white = 255, black = 0;
-  
   image_u8_t* rval = image_u8_create(size, size);
   uint8_t* rowptr = rval->buf;
 
@@ -23,15 +31,15 @@ image_u8_t* apriltag_vis_texture(const apriltag_detection_t* det) {
   for (uint32_t y=0; y<size; ++y) {
     for (uint32_t x=0; x<size; ++x) {
       if (y < wb || y+wb >= size || x < wb || x+wb >= size) {
-        rowptr[x] = white;
+          rowptr[x] = fg;
       } else {
-        rowptr[x] = black;
+          rowptr[x] = bg;
       }
     }
     rowptr += rval->stride;
   }
 
-  uint64_t v = family->codes[det->id];
+  uint64_t v = code;
 
   uint64_t bits = d*d;
 
@@ -41,9 +49,9 @@ image_u8_t* apriltag_vis_texture(const apriltag_detection_t* det) {
   for (uint32_t y=0; y<d; ++y) {
     for (uint32_t x=0; x<d; ++x) {
       if ((v&((uint64_t)(1)<<(uint64_t)(bits-1)))!=0) {
-        rowptr[x] = white;
+          rowptr[x] = fg;
       } else {
-        rowptr[x] = black;
+          rowptr[x] = bg;
       }
       v = v<<(uint64_t)(1);
     }
