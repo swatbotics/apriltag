@@ -246,15 +246,18 @@ class Detector(object):
 
     '''Pythonic wrapper for apriltag_detector. Initialize by passing in
 the output of an argparse.ArgumentParser on which you have called
-add_arguments; or an instance of the DetectorOptions class.'''
+add_arguments; or an instance of the DetectorOptions class.  You can
+also optionally pass in a list of paths to search for the C dynamic
+library used by ctypes.
 
-    def __init__(self, options=None):
+    '''
+
+    def __init__(self, options=None, searchpath=[]):
 
         if options is None:
             options = DetectorOptions()
 
         self.options = options
-
 
         # detect OS to get extension for DLL
         uname0 = os.uname()[0]
@@ -265,21 +268,23 @@ add_arguments; or an instance of the DetectorOptions class.'''
 
         filename = 'libapriltag'+extension
 
+        self.libc = None
+        self.tag_detector = None
 
-        # load the C library and store it as a class variable
-        # note: prefer OS install to local!
-        try:
+        for path in searchpath:
+            relpath = os.path.join(path, filename)
+            if os.path.exists(relpath):
+                self.libc = ctypes.CDLL(relpath)
+                break
+
+        # if full path not found just try opening the raw filename;
+        # this should search whatever paths dlopen is supposed to
+        # search.
+        if self.libc is None:
             self.libc = ctypes.CDLL(filename)
-        except OSError:
-            selfdir = os.path.dirname(__file__)
-            print('selfdir is', selfdir)
-            relpath = os.path.join(selfdir, '../build/lib/', filename)
-            if not os.path.exists(relpath):
-                relpath = os.path.join(os.getcwd(), '../build/lib', filename)
-                if not os.path.exists(relpath):
-                    raise
-            
-            self.libc = ctypes.CDLL(relpath)
+
+        if self.libc is None:
+            raise RuntimeError('could not find DLL named ' + filename)
 
         # declare return types of libc function
         self._declare_return_types()
@@ -319,8 +324,8 @@ add_arguments; or an instance of the DetectorOptions class.'''
             self.add_tag_family(family)
 
     def __del__(self):
-        self.libc.apriltag_detector_destroy(self.tag_detector)
-
+        if self.tag_detector is not None:
+            self.libc.apriltag_detector_destroy(self.tag_detector)
 
     def detect(self, img, return_image=False):
 
@@ -430,12 +435,17 @@ image of type numpy.uint8.'''
         # the underlying data is still in c_img.
         return c_img
 
-        
+######################################################################
+
+def _get_demo_searchpath():
+    
+    return [
+        os.path.join(os.path.dirname(__file__), '../build/lib'),
+        os.path.join(os.getcwd(), '../build/lib')
+    ]
 
 ######################################################################
 
-# tell memory_profile we are interested in this function
-@profile 
 def main():
 
     '''Test function for this Python wrapper.'''
@@ -460,7 +470,15 @@ def main():
     add_arguments(parser)
 
     options = parser.parse_args()
-    det = Detector(options)
+
+    # set up a reasonable search path for the apriltag DLL inside the
+    # github repo this file lives in;
+    #
+    # for "real" deployments, either install the DLL in the appropriate
+    # system-wide library directory, or specify your own search paths
+    # as needed.
+    
+    det = Detector(options, searchpath=_get_demo_searchpath())
 
     use_gui = not options.no_gui
     have_cv2 = False

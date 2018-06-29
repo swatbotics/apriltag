@@ -33,7 +33,15 @@ def main():
     window = 'Camera'
     cv2.namedWindow(window)
 
-    detector = apriltag.Detector(options)
+    # set up a reasonable search path for the apriltag DLL inside the
+    # github repo this file lives in;
+    #
+    # for "real" deployments, either install the DLL in the appropriate
+    # system-wide library directory, or specify your own search paths
+    # as needed.
+    
+    detector = apriltag.Detector(options,
+                                 searchpath=apriltag._get_demo_searchpath())
 
     while True:
 
