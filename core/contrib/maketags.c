@@ -52,7 +52,14 @@ typedef struct paper {
 
 static const paper_t papers[] = {
     { "letter", 612, 792 },
+    { "tabloid", 792, 1224 },
+    { "a6", 297.5, 419.6 },
+    { "a5", 419.3, 595.4 },
     { "a4", 595, 842 },
+    { "a3", 841.5, 1190.7 },
+    { "a2", 1190, 1684 },
+    { "a1", 1683, 2384.2 },
+    { "a0", 2382.8, 3370.8 },
     { NULL, 0, 0 }
 };
     
@@ -66,7 +73,15 @@ void lookup_paper(const char* paper, double paper_dims[2]) {
         }
     }
 
-    fprintf(stderr, "unknown paper type %s\n", paper);
+    fprintf(stderr, "unknown paper type %s\n\n", paper);
+    fprintf(stderr, "choose one of: ");
+    for (int i=0; papers[i].name; ++i) {
+        fprintf(stderr, "%s%s",
+                i == 0 ? "" : ", ",
+                papers[i].name);
+    }
+    fprintf(stderr, "\n");
+    
     exit(1);
     
 }
@@ -140,6 +155,8 @@ void get_options(int argc, char** argv, options_t* opts) {
 
     getopt_add_string(getopt, 'p', "paper", "", "Paper size (choose from letter, a4)");
     getopt_add_string(getopt, 'd', "paperdims", "", "Paper dimensions (e.g. 8.5in,11in)");
+    getopt_add_bool(getopt, 'L', "landscape", 0, "Landscape mode (swap paper dims)");
+    
     getopt_add_double(getopt, 'm', "margin", "0.25in", "Margin around paper edges");
     getopt_add_string(getopt, 't', "tagsize", "", "Tag size (including black border)");
     getopt_add_double(getopt, 'b', "border", "1", "White border around tags (measured in pixels)");
@@ -158,6 +175,7 @@ void get_options(int argc, char** argv, options_t* opts) {
     const char* family_str = getopt_get_string(getopt, "family");
     const char* paper_str = getopt_get_string(getopt, "paper");
     const char* paperdims_str = getopt_get_string(getopt, "paperdims");
+    int is_landscape = getopt_get_bool(getopt, "landscape");
 
     opts->max_id = getopt_get_int(getopt, "maxid");   
     
@@ -207,6 +225,12 @@ void get_options(int argc, char** argv, options_t* opts) {
         parse_size(paperdims_str, opts->paper_dims);
     } else {
         lookup_paper(papers[0].name, opts->paper_dims);
+    }
+
+    if (is_landscape) {
+        double tmp = opts->paper_dims[0];
+        opts->paper_dims[0] = opts->paper_dims[1];
+        opts->paper_dims[1] = tmp;
     }
 
     opts->base_px = opts->family->d + 2*opts->family->black_border;
