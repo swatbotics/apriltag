@@ -459,7 +459,7 @@ def main():
         description='test apriltag Python bindings')
 
     parser.add_argument('filenames', metavar='IMAGE', nargs='+',
-                        help='files to convert')
+                        help='files to scan')
 
     parser.add_argument('-n', '--no-gui', action='store_true',
                         help='suppress OpenCV gui')
