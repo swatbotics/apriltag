@@ -467,7 +467,8 @@ matd_t* pose_from_homography(const matd_t* H,
 
         double e = reprojection_objective(corners_meas,
                                           fx, fy, cx, cy, tag_size,
-                                          rvec, tvec, g.data, &J);
+                                          rvec, tvec, g.data,
+                                          done ? NULL : &J);
 
         //printf("objective at iter %3d is %12f\n", iter, e);
 
