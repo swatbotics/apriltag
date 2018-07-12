@@ -7,7 +7,8 @@ set(sources
   common/workerpool.c common/time_util.c common/svd22.c 
   common/homography.c common/string_util.c common/getopt.c
   contrib/box.c contrib/contour.c contrib/lm.c contrib/pdfutil.c
-  contrib/apriltag_quad_contour.c contrib/apriltag_vis.c)
+  contrib/apriltag_quad_contour.c contrib/apriltag_vis.c
+  contrib/pose.c)
 
 include_directories(common contrib .)
 
@@ -28,5 +29,9 @@ target_link_libraries(pdf_test apriltag ${CMAKE_THREAD_LIBS_INIT} m)
 add_executable(maketags contrib/maketags.c)
 target_link_libraries(maketags apriltag ${CMAKE_THREAD_LIBS_INIT} m )
 
+add_executable(pose_test contrib/pose_test.c)
+target_link_libraries(pose_test apriltag ${CMAKE_THREAD_LIBS_INIT} m )
+
 install(TARGETS apriltag_demo DESTINATION bin)
+install(TARGETS maketags DESTINATION bin)
 install(TARGETS apriltag DESTINATION lib)
