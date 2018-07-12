@@ -35,12 +35,12 @@ Python
 ======
 
 I recently added the ability to estimate 3D tag poses to the Python wrapper.
-To run this, after building the software, go to the python directory and run
+To demonstrate this, after building the software, go to the python directory and run
 
-    python ../python/apriltag.py -c -k '(765.00, 764.18, 393.72, 304.66)' -s .127 ../images/mapping_feb_2014/*JPG
+    python apriltag.py -c -k '(765.00, 764.18, 393.72, 304.66)' -s .127 ../images/mapping_feb_2014/*JPG
 
 To estimate tag pose, you need to know the [intrinsic camera parameters](https://docs.opencv.org/3.3.1/dc/dbb/tutorial_py_calibration.html), which
-can be estimated using the <python/calibrate_camera.py> script.
+can be estimated using the [calibrate_camera.py](python/calibrate_camera.py) script.
 
 You also need to know the tag size in order to scale the estimated translation
 vectors correctly.
