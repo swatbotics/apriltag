@@ -190,7 +190,7 @@ void rvec_from_matrix(const matd_t* R, double rvec[3]) {
 
 void quaternion_from_matrix(const matd_t* R, double q[4]) {
 
-    assert( R.nrows == 3 && R.ncols == 3 );
+    assert( (R->nrows == 3 && R->ncols == 3) || (R->nrows == 4 && R->ncols == 4) );
 
     double r11 = MATD_EL(R, 0, 0);
     double r12 = MATD_EL(R, 0, 1);
@@ -371,7 +371,7 @@ double reprojection_error(const double corners_meas[][2],
         }
     }
 
-    if (rtgrad) {
+    if (rtgrad && Jrt) {
         matd_t* g = matd_op("M'*M", Jrt, (const matd_t*)&err);
         memcpy(rtgrad, g->data, 6*sizeof(double));
         matd_destroy(g);
@@ -416,7 +416,9 @@ matd_t* pose_from_homography(const matd_t* H,
                              double fx, double fy, double cx, double cy,
                              double tag_size,
                              double z_sign,
-                             const double corners_meas[][2]) {
+                             const double corners_meas[][2],
+                             double* initial_error,
+                             double* final_error) {
 
     matd_t* M = homography_to_pose(H, fx, fy, cx, cy);
 
@@ -434,86 +436,97 @@ matd_t* pose_from_homography(const matd_t* H,
         MATD_EL(M, i, 3) *= tag_size;
     }
 
-    if (corners_meas) {
-
-        double rvec[3], tvec[3];
-        mat4_to_rvec_tvec(M, rvec, tvec);
-
-        matd_6_t g = { 6, 1, { 0 } };
-
-        double best_e = DBL_MAX;
-        double best_rvec[3], best_tvec[3];
-
-        const double LMAX = 1e2;
-        const double LMIN = 1e-7;
-        const double STEP_TOL = 1e-12;
+    
+    if (!corners_meas) { return M; }
         
-        double lambda = LMAX;
-
-        memcpy(best_rvec, rvec, sizeof(rvec));
-        memcpy(best_tvec, tvec, sizeof(tvec));
+    double rvec[3], tvec[3];
         
-        for (int iter=0; iter<1000; ++iter) {
+    mat4_to_rvec_tvec(M, rvec, tvec);
 
-            matd_t* J;
+    double best_e = DBL_MAX;
+    
+    matd_6_t g = { 6, 1, { 0 } };
 
-            double e = reprojection_objective(corners_meas,
-                                              fx, fy, cx, cy, tag_size,
-                                              rvec, tvec, g.data, &J);
 
-            //printf("objective at iter %3d is %12f\n", iter, e);
+    double best_rvec[3], best_tvec[3];
 
-            if (e < best_e) {
-                best_e = e;
-                memcpy(best_rvec, rvec, sizeof(rvec));
-                memcpy(best_tvec, tvec, sizeof(tvec));
-                lambda *= 0.5;
-                if (lambda < LMIN) { lambda = LMIN; }
-                //printf("better than previous best of %g, decreased to lambda=%g\n", best_e, lambda);
-            } else {
-                memcpy(rvec, best_rvec, sizeof(rvec));
-                memcpy(tvec, best_tvec, sizeof(tvec));
-                lambda *= 10.0;
-                if (lambda > LMAX) { lambda = LMAX; }
-                //printf("worse than previous best of %g, increased to lambda=%g\n", best_e, lambda);
-            }
+    const double LMAX = 1e5;
+    const double LMIN = 1e-7;
+    const double STEP_TOL = 1e-12;
+    const int MAX_ITER = 100;
+        
+    double lambda = LMAX;
+    int done = 0;
 
-            matd_t* JTJ = matd_op("M'*M", J, J);
+    memcpy(best_rvec, rvec, sizeof(rvec));
+    memcpy(best_tvec, tvec, sizeof(tvec));
+        
+    for (int iter=0; iter<MAX_ITER; ++iter) {
 
-            for (int i=0; i<6; ++i) {
-                MATD_EL(JTJ, i, i) += lambda;
-            }
+        matd_t* J;
 
-            matd_t* step = matd_solve(JTJ, (matd_t*)&g);
+        double e = reprojection_objective(corners_meas,
+                                          fx, fy, cx, cy, tag_size,
+                                          rvec, tvec, g.data, &J);
 
-            double stotal = 0;
-            for (int i=0; i<6; ++i) {
-                stotal += step->data[i] * step->data[i];
-            }
+        //printf("objective at iter %3d is %12f\n", iter, e);
 
-            for (int i=0; i<3; ++i) {
-                rvec[i] -= step->data[i+0];
-                tvec[i] -= step->data[i+3];
-            }
-
-            matd_destroy(J);
-            matd_destroy(JTJ);
-            matd_destroy(step);
-
-            if (stotal < STEP_TOL) {
-                //printf("done!\n");
-                break;
-            }
-            
+        if (e < best_e) {
+            best_e = e;
+            memcpy(best_rvec, rvec, sizeof(rvec));
+            memcpy(best_tvec, tvec, sizeof(tvec));
+            lambda *= 0.5;
+            if (lambda < LMIN) { lambda = LMIN; }
+            //printf("better than previous best of %g, decreased to lambda=%g\n", best_e, lambda);
+        } else {
+            memcpy(rvec, best_rvec, sizeof(rvec));
+            memcpy(tvec, best_tvec, sizeof(tvec));
+            lambda *= 10.0;
+            if (lambda > LMAX) { lambda = LMAX; }
+            //printf("worse than previous best of %g, increased to lambda=%g\n", best_e, lambda);
         }
 
-        matd_destroy(M);
-           
-        M = mat4_from_rvec_tvec(rvec, tvec);
+        if (iter == 0 && initial_error) {
+            *initial_error = best_e;
+        }
+        
+        if (done) {
+            break;
+        }
 
+        matd_t* JTJ = matd_op("M'*M", J, J);
+
+        for (int i=0; i<6; ++i) {
+            MATD_EL(JTJ, i, i) += lambda;
+        }
+
+        matd_t* step = matd_solve(JTJ, (matd_t*)&g);
+
+        double stotal = 0;
+        for (int i=0; i<6; ++i) {
+            stotal += step->data[i] * step->data[i];
+        }
+
+        for (int i=0; i<3; ++i) {
+            rvec[i] -= step->data[i+0];
+            tvec[i] -= step->data[i+3];
+        }
+
+        matd_destroy(J);
+        matd_destroy(JTJ);
+        matd_destroy(step);
+
+        if (stotal < STEP_TOL) {
+            done = 1;
+        }
+            
     }
 
-    return M;
+    if (final_error) { *final_error = best_e; }
+
+    matd_destroy(M);
+           
+    return mat4_from_rvec_tvec(rvec, tvec);
 
 }
 
@@ -521,16 +534,11 @@ void mat4_to_rvec_tvec(const matd_t* M,
                        double rvec[3],
                        double tvec[3]) {
 
-    matd_9_t M33 = { 3, 3, { 0 } };
-        
     for (int i=0; i<3; ++i) {
-        for (int j=0; j<3; ++j) {
-            MATD_EL((&M33), i, j) = MATD_EL(M, i, j);
-        }
         tvec[i] = MATD_EL(M, i, 3);
     }
 
-    rvec_from_matrix((const matd_t*)&M33, rvec);
+    rvec_from_matrix(M, rvec);
 
 }
 

@@ -494,7 +494,8 @@ void test_pose_from_homograpy() {
     matd_print(H, MAT_FMT);
     printf("\n");
 
-    matd_t* M = pose_from_homography(H, fx, fy, cx, cy, tagsize, 1.0, NULL);
+    matd_t* M = pose_from_homography(H, fx, fy, cx, cy, tagsize, 1.0,
+                                     NULL, NULL, NULL);
 
     double rvec2[3], tvec2[3];
 
@@ -530,24 +531,29 @@ void test_pose_from_homograpy_refine_contrived() {
     // initialize homography with wrong points
     matd_t* H_bad = homography_from_corners(corners_meas);
 
+    double e_bad, e_good;
+
     // get pose for this - should disagree with "correct" pose
-    matd_t* M_bad = pose_from_homography(H_bad, fx, fy, cx, cy, tagsize, 1.0, NULL);
+    matd_t* M_bad = pose_from_homography(H_bad, fx, fy, cx, cy, tagsize, 1.0, NULL, NULL, NULL);
     
     // get pose for correct points
-    matd_t* M_good = pose_from_homography(H_bad, fx, fy, cx, cy, tagsize, 1.0, corners);
+    matd_t* M_good = pose_from_homography(H_bad, fx, fy, cx, cy, tagsize, 1.0, corners, &e_bad, &e_good);
 
     double rvec2[3], tvec2[3], rvec3[3], tvec3[3];
 
     mat4_to_rvec_tvec(M_bad, rvec2, tvec2);
     mat4_to_rvec_tvec(M_good, rvec3, tvec3);
 
-    double e_bad = reprojection_objective(corners,
-                                          fx, fy, cx, cy, tagsize,
-                                          rvec2, tvec2, NULL, NULL);
+    double e_bad2 = reprojection_objective(corners,
+                                           fx, fy, cx, cy, tagsize,
+                                           rvec2, tvec2, NULL, NULL);
 
-    double e_good = reprojection_objective(corners,
-                                          fx, fy, cx, cy, tagsize,
-                                          rvec3, tvec3, NULL, NULL);
+    double e_good2 = reprojection_objective(corners,
+                                            fx, fy, cx, cy, tagsize,
+                                            rvec3, tvec3, NULL, NULL);
+
+    verify(&e_bad, &e_bad2, 1, 1);
+    verify(&e_good, &e_good2, 1, 1);
 
     const double zero = 0;
 
@@ -584,25 +590,28 @@ void test_pose_from_homograpy_refine_plausible() {
     // initialize homography with wrong points
     matd_t* H_bad = homography_from_corners(corners_meas);
 
-    matd_t* M_bad = pose_from_homography(H_bad, fx, fy, cx, cy, tagsize, 1.0, NULL);
+    double e_bad, e_bad2, e_ok, e_ok2;
 
-    matd_t* M_ok = pose_from_homography(H_bad, fx, fy, cx, cy, tagsize, 1.0, corners_meas);
+    matd_t* M_bad = pose_from_homography(H_bad, fx, fy, cx, cy, tagsize, 1.0, NULL, NULL, NULL);
+
+    matd_t* M_ok = pose_from_homography(H_bad, fx, fy, cx, cy, tagsize, 1.0, corners_meas, &e_bad, &e_ok);
 
     double rvec[3], tvec[3], rvec2[3], tvec2[3];
     
     mat4_to_rvec_tvec(M_bad, rvec, tvec);
     mat4_to_rvec_tvec(M_ok, rvec2, tvec2);
     
-    double e_bad = reprojection_objective(corners_meas,
-                                          fx, fy, cx, cy, tagsize,
-                                          rvec, tvec, NULL, NULL);
-
+    e_bad2 = reprojection_objective(corners_meas,
+                                    fx, fy, cx, cy, tagsize,
+                                    rvec, tvec, NULL, NULL);
     
-    double e_ok = reprojection_objective(corners_meas,
-                                         fx, fy, cx, cy, tagsize,
-                                         rvec2, tvec2, NULL, NULL);
+    e_ok2 = reprojection_objective(corners_meas,
+                                   fx, fy, cx, cy, tagsize,
+                                   rvec2, tvec2, NULL, NULL);
     
-    printf("e_bad=%g, e_ok=%g\n", e_bad, e_ok);
+    verify(&e_ok, &e_ok2, 1, 1);
+    
+    verify(&e_bad, &e_bad2, 1, 1);
 
     if (e_ok >= e_bad) {
         fprintf(stderr, "%s:%d error: expect e_ok < e_bad in %s\n",
