@@ -19,6 +19,15 @@ import os
 import re
 import numpy
 
+_HAVE_CV2 = False
+
+if __name__ == '__main__':
+    try:
+        import cv2
+        _HAVE_CV2 = True
+    except:
+        from PIL import Image
+
 ######################################################################
 
 # pylint: disable=R0903
@@ -105,6 +114,7 @@ def _matd_get_array(mat_ptr):
                            int(mat_ptr.contents.nrows),
                            int(mat_ptr.contents.ncols))
 
+
 ######################################################################
 
 DetectionBase = collections.namedtuple(
@@ -126,24 +136,27 @@ tuple class.
 
     _max_len = max(len(field) for field in _print_fields)
 
-    def tostring(self, indent=0):
+    def tostring(self, values=None, indent=0):
 
         '''Converts this object to a string with the given level of indentation.'''
 
         rval = []
         indent_str = ' '*(self._max_len+2+indent)
 
-        for i, label in enumerate(self._print_fields):
+        if not values:
+            values = collections.OrderedDict(zip(self._print_fields, self))
 
-            value = str(self[i])
+        for label in values:
 
-            if value.find('\n') > 0:
-                value = value.split('\n')
-                value = [value[0]] + [indent_str+v for v in value[1:]]
-                value = '\n'.join(value)
+            value_str = str(values[label])
+
+            if value_str.find('\n') > 0:
+                value_str = value_str.split('\n')
+                value_str = [value_str[0]] + [indent_str+v for v in value_str[1:]]
+                value_str = '\n'.join(value_str)
 
             rval.append('{:>{}s}: {}'.format(
-                label, self._max_len+indent, value))
+                label, self._max_len+indent, value_str))
 
         return '\n'.join(rval)
 
@@ -396,6 +409,35 @@ image of type numpy.uint8.'''
         else:
             print('Unrecognized tag family name. Try e.g. tag36h11')
 
+    def detection_pose(self, detection, camera_params, tag_size=1, z_sign=1):
+
+        fx, fy, cx, cy = [ ctypes.c_double(c) for c in camera_params ]
+        
+        H = self.libc.matd_create(3, 3)
+        arr = _matd_get_array(H)
+        arr[:] = detection.homography
+        corners = detection.corners.flatten().astype(numpy.float64)
+
+        dptr = ctypes.POINTER(ctypes.c_double)
+
+        corners = corners.ctypes.data_as(dptr)
+
+        init_error = ctypes.c_double(0)
+        final_error = ctypes.c_double(0)
+        
+        Mptr = self.libc.pose_from_homography(H, fx, fy, cx, cy,
+                                              ctypes.c_double(tag_size),
+                                              ctypes.c_double(z_sign),
+                                              corners,
+                                              dptr(init_error),
+                                              dptr(final_error))
+
+        M = _matd_get_array(Mptr).copy()
+        self.libc.matd_destroy(H)
+        self.libc.matd_destroy(Mptr)
+
+        return M, init_error.value, final_error.value
+
     def _vis_detections(self, shape, detections):
 
         height, width = shape
@@ -418,6 +460,9 @@ image of type numpy.uint8.'''
         self.libc.image_u8_write_pnm.restype = ctypes.c_int
         self.libc.apriltag_family_list.restype = ctypes.POINTER(_ZArray)
         self.libc.apriltag_vis_detections.restype = None
+
+        self.libc.pose_from_homography.restype = ctypes.POINTER(_Matd)
+        self.libc.matd_create.restype = ctypes.POINTER(_Matd)
 
     def _convert_image(self, img):
 
@@ -446,6 +491,71 @@ def _get_demo_searchpath():
 
 ######################################################################
 
+def _camera_params(pstr):
+    
+    pstr = pstr.strip()
+    
+    if pstr[0] == '(' and pstr[-1] == ')':
+        pstr = pstr[1:-1]
+
+    params = tuple( [ float(param.strip()) for param in pstr.split(',') ] )
+
+    assert( len(params) ==  4)
+
+    return params
+
+######################################################################
+
+def _draw_pose(overlay, camera_params, tag_size, pose, z_sign=1):
+
+    opoints = numpy.array([
+        -1, -1, 0,
+         1, -1, 0,
+         1,  1, 0,
+        -1,  1, 0,
+        -1, -1, -2*z_sign,
+         1, -1, -2*z_sign,
+         1,  1, -2*z_sign,
+        -1,  1, -2*z_sign,
+    ]).reshape(-1, 1, 3) * tag_size
+
+    edges = numpy.array([
+        0, 1,
+        1, 2,
+        2, 3,
+        3, 0,
+        0, 4,
+        1, 5,
+        2, 6,
+        3, 7,
+        4, 5,
+        5, 6,
+        6, 7,
+        7, 4
+    ]).reshape(-1, 2)
+        
+    fx, fy, cx, cy = camera_params
+
+    K = numpy.array([fx, 0, cx, 0, fy, cy, 0, 0, 1]).reshape(3, 3)
+
+    rvec, _ = cv2.Rodrigues(pose[:3,:3])
+    tvec = pose[:3, 3]
+
+    dcoeffs = numpy.zeros(5)
+
+    ipoints, _ = cv2.projectPoints(opoints, rvec, tvec, K, dcoeffs)
+
+    ipoints = numpy.round(ipoints).astype(int)
+    
+    ipoints = [tuple(pt) for pt in ipoints.reshape(-1, 2)]
+
+    for i, j in edges:
+        cv2.line(overlay, ipoints[i], ipoints[j], (0, 255, 0), 1, 16)
+
+    
+
+######################################################################
+
 def main():
 
     '''Test function for this Python wrapper.'''
@@ -467,6 +577,14 @@ def main():
     parser.add_argument('-d', '--debug-images', action='store_true',
                         help='output debug detection image')
 
+    parser.add_argument('-k', '--camera-params', type=_camera_params,
+                        default=None,
+                        help='intrinsic parameters for camera (in the form fx,fy,cx,cy)')
+
+    parser.add_argument('-s', '--tag-size', type=float,
+                        default=1.0,
+                        help='tag size in user-specified units (default=1.0)')
+
     add_arguments(parser)
 
     options = parser.parse_args()
@@ -481,22 +599,14 @@ def main():
     det = Detector(options, searchpath=_get_demo_searchpath())
 
     use_gui = not options.no_gui
-    have_cv2 = False
 
-    if use_gui:
-        try:
-            import cv2
-            have_cv2 = True
-        except:
-            use_gui = False
-            print('suppressing GUI because cv2 module not found')
-
-    if not have_cv2:
-        from PIL import Image
+    if use_gui and not _HAVE_CV2:
+        use_gui = False
+        print('suppressing GUI because cv2 module not found')
 
     for filename in options.filenames:
 
-        if have_cv2:
+        if _HAVE_CV2:
             orig = cv2.imread(filename)
             if len(orig.shape) == 3:
                 gray = cv2.cvtColor(orig, cv2.COLOR_RGB2GRAY)
@@ -509,19 +619,40 @@ def main():
 
         detections, dimg = det.detect(gray, return_image=True)
 
-        num_detections = len(detections)
-        print('Detected {} tags.\n'.format(num_detections))
-
-        for i, detection in enumerate(detections):
-            print( 'Detection {} of {}:'.format(i+1, num_detections))
-            print()
-            print( detection.tostring(indent=2))
-            print()
-
         if len(orig.shape) == 3:
             overlay = orig // 2 + dimg[:, :, None] // 2
         else:
             overlay = gray // 2 + dimg // 2
+        
+        num_detections = len(detections)
+        print('Detected {} tags in {}\n'.format(
+            num_detections, os.path.split(filename)[1]))
+
+        for i, detection in enumerate(detections):
+            print( 'Detection {} of {}:'.format(i+1, num_detections))
+            print()
+            print(detection.tostring(indent=2))
+
+            if options.camera_params is not None:
+                
+                pose, e0, e1 = det.detection_pose(detection,
+                                                  options.camera_params,
+                                                  options.tag_size)
+
+                if use_gui:
+                    _draw_pose(overlay,
+                               options.camera_params,
+                               options.tag_size,
+                               pose)
+                
+                print(detection.tostring(
+                    collections.OrderedDict([('Pose',pose),
+                                             ('InitError', e0),
+                                             ('FinalError', e1)]),
+                    indent=2))
+                
+            print()
+
 
         if options.debug_images:
             output = Image.fromarray(overlay)
