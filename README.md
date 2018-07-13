@@ -5,6 +5,9 @@ Small modifications/additions to  http://april.eecs.umich.edu/media/apriltag/apr
 
 Added a new quad detector and a few various speedups.
 
+***Please note:*** I am not the maintainer of the pypi package listed at https://pypi.org/project/apriltag/ – GitHub issues filed here reporting problems with that package will be summarily closed. Sorry, I don't have time to support someone else's unofficial package.
+
+
 Dependencies
 ============
 
