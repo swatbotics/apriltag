@@ -24,10 +24,10 @@ const double tvec[3] = { 0.1, -0.05, 1.0 };
 const double tagsize = 0.15;
 
 const double corners_meas[4][2] = {
-    { 368, 153 },
-    { 614, 160 },
-    { 593, 372 },
-    { 378, 356 }
+    { 428, 212 },
+    { 547, 212 },
+    { 540, 320 },
+    { 427, 315 }
 };
 
 
@@ -246,8 +246,8 @@ void test_proj() {
 
     for (int i=0; i<4; ++i) {
         
-        MATD_EL(v, 0, 0) = (i == 0 || i == 3) ? -tagsize : tagsize;
-        MATD_EL(v, 1, 0) = (i == 0 || i == 1) ? -tagsize : tagsize;
+        MATD_EL(v, 0, 0) = (i == 0 || i == 3) ? -0.5*tagsize : 0.5*tagsize;
+        MATD_EL(v, 1, 0) = (i == 0 || i == 1) ? -0.5*tagsize : 0.5*tagsize;
         MATD_EL(v, 2, 0) = 0;
         
         matd_t* g = matd_multiply(R, v);

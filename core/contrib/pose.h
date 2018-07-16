@@ -36,7 +36,7 @@ void rotate_vector(const double rvec[3],
 
 matd_t* pose_from_homography(const matd_t* H,
                              double fx, double fy, double cx, double cy,
-                             double tag_size,
+                             double tagsize,
                              double z_sign,
                              const double corners_meas[][2],
                              double* initial_error,

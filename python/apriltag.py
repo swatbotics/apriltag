@@ -26,7 +26,7 @@ if __name__ == '__main__':
         import cv2
         _HAVE_CV2 = True
     except:
-        from PIL import Image
+        pass
 
 ######################################################################
 
@@ -517,7 +517,7 @@ def _draw_pose(overlay, camera_params, tag_size, pose, z_sign=1):
          1, -1, -2*z_sign,
          1,  1, -2*z_sign,
         -1,  1, -2*z_sign,
-    ]).reshape(-1, 1, 3) * tag_size
+    ]).reshape(-1, 1, 3) * 0.5*tag_size
 
     edges = numpy.array([
         0, 1,
@@ -604,6 +604,9 @@ def main():
         use_gui = False
         print('suppressing GUI because cv2 module not found')
 
+    if not _HAVE_CV2:
+        from PIL import Image
+
     for filename in options.filenames:
 
         if _HAVE_CV2:
@@ -623,7 +626,7 @@ def main():
             overlay = orig // 2 + dimg[:, :, None] // 2
         else:
             overlay = gray // 2 + dimg // 2
-        
+
         num_detections = len(detections)
         print('Detected {} tags in {}\n'.format(
             num_detections, os.path.split(filename)[1]))
@@ -639,7 +642,7 @@ def main():
                                                   options.camera_params,
                                                   options.tag_size)
 
-                if use_gui:
+                if _HAVE_CV2:
                     _draw_pose(overlay,
                                options.camera_params,
                                options.tag_size,
@@ -655,8 +658,11 @@ def main():
 
 
         if options.debug_images:
-            output = Image.fromarray(overlay)
-            output.save('detections.png')
+            if _HAVE_CV2:
+                cv2.imwrite('detections.png', overlay)
+            else:
+                output = Image.fromarray(overlay)
+                output.save('detections.png')
             
         if use_gui:
             cv2.imshow('win', overlay)

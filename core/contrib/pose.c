@@ -274,10 +274,10 @@ void project_points(double fx, double fy, double cx, double cy,
                     matd_t** Jptr) {
 
     const double corners_raw[4][3] = {
-        { -tagsize, -tagsize, 0 },
-        {  tagsize, -tagsize, 0 },
-        {  tagsize,  tagsize, 0 },
-        { -tagsize,  tagsize, 0 }
+        { -0.5*tagsize, -0.5*tagsize, 0 },
+        {  0.5*tagsize, -0.5*tagsize, 0 },
+        {  0.5*tagsize,  0.5*tagsize, 0 },
+        { -0.5*tagsize,  0.5*tagsize, 0 }
     };
 
     if (Jptr) { *Jptr = matd_create(8, 6); }
@@ -414,7 +414,7 @@ double reprojection_objective(const double corners_meas[][2],
 
 matd_t* pose_from_homography(const matd_t* H,
                              double fx, double fy, double cx, double cy,
-                             double tag_size,
+                             double tagsize,
                              double z_sign,
                              const double corners_meas[][2],
                              double* initial_error,
@@ -433,7 +433,7 @@ matd_t* pose_from_homography(const matd_t* H,
     }
 
     for (int i=0; i<3; ++i) {
-        MATD_EL(M, i, 3) *= tag_size;
+        MATD_EL(M, i, 3) *= 0.5*tagsize;
     }
 
     
@@ -466,7 +466,7 @@ matd_t* pose_from_homography(const matd_t* H,
         matd_t* J;
 
         double e = reprojection_objective(corners_meas,
-                                          fx, fy, cx, cy, tag_size,
+                                          fx, fy, cx, cy, tagsize,
                                           rvec, tvec, g.data,
                                           done ? NULL : &J);
 
