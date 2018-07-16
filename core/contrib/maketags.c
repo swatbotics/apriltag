@@ -28,14 +28,16 @@ static const unit_t units[] = {
   { "ft", 72*12 },
   { "cm", 28.346456693 },
   { "mm", 2.8346456693 },
+  { "cm", 28.346456693 },
+  { "m", 283.46456693 },
   { NULL, 0 }
 };
 
-double lookup_unit(const char* unit) {
+const unit_t* lookup_unit(const char* unit) {
 
     for (int i=0; units[i].name; ++i) {
         if (!strcmp(unit, units[i].name)) {
-            return units[i].points;
+            return units+i;
         }
     }
 
@@ -47,29 +49,30 @@ double lookup_unit(const char* unit) {
 typedef struct paper {
     const char* name;
     double width, height;
+    const char* unit_name;
 } paper_t;
 
 
 static const paper_t papers[] = {
-    { "letter", 612, 792 },
-    { "tabloid", 792, 1224 },
-    { "a6", 297.5, 419.6 },
-    { "a5", 419.3, 595.4 },
-    { "a4", 595, 842 },
-    { "a3", 841.5, 1190.7 },
-    { "a2", 1190, 1684 },
-    { "a1", 1683, 2384.2 },
-    { "a0", 2382.8, 3370.8 },
+    { "letter", 612, 792, "in" },
+    { "tabloid", 792, 1224, "in" },
+    { "a6", 297.5, 419.6, "mm" },
+    { "a5", 419.3, 595.4, "mm" },
+    { "a4", 595, 842, "mm" },
+    { "a3", 841.5, 1190.7, "mm" },
+    { "a2", 1190, 1684, "mm" },
+    { "a1", 1683, 2384.2, "mm" },
+    { "a0", 2382.8, 3370.8, "mm" },
     { NULL, 0, 0 }
 };
     
-void lookup_paper(const char* paper, double paper_dims[2]) {
+const unit_t* lookup_paper(const char* paper, double paper_dims[2]) {
 
     for (int i=0; papers[i].name; ++i) {
         if (!strcmp(paper, papers[i].name)) {
             paper_dims[0] = papers[i].width;
             paper_dims[1] = papers[i].height;
-            return;
+            return lookup_unit(papers[i].unit_name);
         }
     }
 
@@ -86,17 +89,19 @@ void lookup_paper(const char* paper, double paper_dims[2]) {
     
 }
 
-double parse_unit(const char* meas) {
+const unit_t* parse_unit(const char* meas, double* quantity) {
     double value;
     char unit[6];
     if (sscanf(meas, "%lf %5s", &value, unit) != 2) {
         fprintf(stderr, "error parsing measurement: %s\n", meas);
         exit(1);
     }
-    return value * lookup_unit(unit);
+    const unit_t* u = lookup_unit(unit);
+    *quantity = value * u->points;
+    return u;
 }
 
-void parse_size(const char* mpair_orig, double dims[2]) {
+const unit_t* parse_size(const char* mpair_orig, double dims[2]) {
 
     char* mpair = strdup(mpair_orig);
     char* comma = strchr(mpair, ',');
@@ -108,10 +113,12 @@ void parse_size(const char* mpair_orig, double dims[2]) {
 
     *comma = 0;
 
-    dims[0] = parse_unit(mpair);
-    dims[1] = parse_unit(comma+1);
+    parse_unit(mpair, dims+0);
+    const unit_t* rval = parse_unit(comma+1, dims+1);
 
     free(mpair);
+
+    return rval;
 
 }
 
@@ -142,6 +149,12 @@ typedef struct options {
     
     const char* labelfmt_str;
     const char* output_filename;
+
+    const unit_t* paper_unit;
+    const unit_t* tag_unit;
+    const unit_t* font_unit;
+
+    char tagsize_buf[1024];
     
 } options_t;
 
@@ -153,7 +166,7 @@ void get_options(int argc, char** argv, options_t* opts) {
     getopt_add_string(getopt, 'f', "family", "tag36h11", "Tag family to use");
     getopt_add_int(getopt, 'M', "maxid", "0", "Maximum # of tags to output (0 = include all)");
 
-    getopt_add_string(getopt, 'p', "paper", "", "Paper size (choose from letter, a4)");
+    getopt_add_string(getopt, 'p', "paper", "", "Paper size (choose from letter, tabloid, a6, a5, a4, a3, a2, a1, a0)");
     getopt_add_string(getopt, 'd', "paperdims", "", "Paper dimensions (e.g. 8.5in,11in)");
     getopt_add_bool(getopt, 'L', "landscape", 0, "Landscape mode (swap paper dims)");
     
@@ -177,17 +190,21 @@ void get_options(int argc, char** argv, options_t* opts) {
     const char* paperdims_str = getopt_get_string(getopt, "paperdims");
     int is_landscape = getopt_get_bool(getopt, "landscape");
 
+    opts->paper_unit = opts->tag_unit = opts->font_unit = units + 0;
+
     opts->max_id = getopt_get_int(getopt, "maxid");   
     
     opts->tagsize_str = getopt_get_string(getopt, "tagsize");
     
     opts->labelfmt_str = getopt_get_string(getopt, "labelfmt");
 
-    double margin = parse_unit(getopt_get_string(getopt, "margin"));
+    double margin;
+    parse_unit(getopt_get_string(getopt, "margin"), &margin);
 
     opts->output_filename = getopt_get_string(getopt, "output");
 
-    opts->fontsize = parse_unit(getopt_get_string(getopt, "fontsize"));
+    opts->font_unit = parse_unit(getopt_get_string(getopt, "fontsize"), &opts->fontsize);
+    
     opts->lgray = getopt_get_double(getopt, "labelgray");
     
     double border_px = getopt_get_double(getopt, "border");
@@ -217,14 +234,14 @@ void get_options(int argc, char** argv, options_t* opts) {
     }
 
     if (*paper_str) {
-        lookup_paper(paper_str, opts->paper_dims);
+        opts->paper_unit = lookup_paper(paper_str, opts->paper_dims);
         if (*paperdims_str) {
             fprintf(stderr, "warning: ignoring paperdims because paper was set!\n");
         }
     } else if (*paperdims_str) {
-        parse_size(paperdims_str, opts->paper_dims);
+        opts->paper_unit = parse_size(paperdims_str, opts->paper_dims);
     } else {
-        lookup_paper(papers[0].name, opts->paper_dims);
+        opts->paper_unit = lookup_paper(papers[0].name, opts->paper_dims);
     }
 
     if (is_landscape) {
@@ -237,26 +254,29 @@ void get_options(int argc, char** argv, options_t* opts) {
 
     if (*opts->tagsize_str) {
             
-        opts->tagsize = parse_unit(opts->tagsize_str);
+        opts->tag_unit = parse_unit(opts->tagsize_str, &opts->tagsize);
         opts->px = opts->tagsize / opts->base_px;
         opts->border = border_px * opts->px;
             
     } else {
             
         double total_px = opts->base_px + 2*border_px;
+
+        opts->tag_unit = opts->paper_unit;
             
         opts->px = opts->paper_dims[0] / total_px;
         opts->border = border_px * opts->px;
         opts->tagsize = opts->paper_dims[0] - 2*opts->border;
 
-        static char buf[1024];
-        snprintf(buf, 1024, "%g mm", opts->tagsize / lookup_unit("mm"));
-        opts->tagsize_str = buf;
+        snprintf(opts->tagsize_buf, 1024, "%g %s",
+                 opts->tagsize / opts->tag_unit->points,
+                 opts->tag_unit->name);
+        
+        opts->tagsize_str = opts->tagsize_buf;
             
     }
     
     const double dir[2] = { 1, -1 };
-
 
     opts->tag_step[0] = opts->tagsize + opts->border * 2;
     opts->tag_step[1] = opts->tag_step[0] + opts->fontsize;
@@ -277,13 +297,27 @@ void get_options(int argc, char** argv, options_t* opts) {
     printf("using tag family %s of size %d\n",
            family_str, opts->family->d);
     
-    printf("using paper size of (%g, %g) pt with margins of %g pt\n",
-           opts->paper_dims[0], opts->paper_dims[1], margin);
+    printf("using paper size of (%g %s, %g %s) with margins of %g pt\n",
+           opts->paper_dims[0] / opts->paper_unit->points,
+           opts->paper_unit->name,
+           opts->paper_dims[1] / opts->paper_unit->points,
+           opts->paper_unit->name,
+           margin);
 
-    printf("tag size with border is %g pt\n", opts->tagsize);
+    printf("tag size with border is %g %s\n",
+           opts->tagsize / opts->tag_unit->points,
+           opts->tag_unit->name);
     
     printf("output will have %d rows x %d cols\n",
            opts->grid_dims[0], opts->grid_dims[1]);
+
+    if (opts->fontsize) {
+        printf("showing labels at font size %g %s with format \"%s\"\n",
+               opts->fontsize / opts->font_unit->points,
+               opts->font_unit->name,
+               opts->labelfmt_str);
+    
+    }
     
     printf("will output to %s\n", opts->output_filename);
     
@@ -386,6 +420,8 @@ int main(int argc, char** argv) {
             format_label(label_string, 1024,
                          opts.labelfmt_str,
                          i, opts.family->name, opts.tagsize_str);
+
+            printf("label_string = %s\n", label_string);
                          
             pdf_gstate_push(pdf);
             pdf_set_fill(pdf, &label_fill);
