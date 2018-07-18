@@ -21,7 +21,11 @@ Building
     cd build
     cmake .. -DCMAKE_BUILD_TYPE=Release
     make -j4
-    
+
+If you want to install the library and important binaries to your system directories, you can then type
+
+    sudo make install
+
 Running
 =======
 
@@ -36,6 +40,12 @@ to benchmark the new code against the old code.
 
 Python
 ======
+
+***Note that you must build the software per the instructions above before the Python wrapper can 
+be used.*** If you did not install the libraries to the system-wide library directory and you 
+are not running Python code from the python directory in this repository, your Python code
+must specify the  path for the apriltag shared library when constructing an
+`apriltag.Detector` object.
 
 I recently added the ability to estimate 3D tag poses to the Python wrapper.
 To demonstrate this, after building the software, go to the python directory and run
