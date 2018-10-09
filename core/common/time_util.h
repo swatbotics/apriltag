@@ -32,9 +32,15 @@ either expressed or implied, of the FreeBSD Project.
 #ifndef _TIME_UTIL_H
 #define _TIME_UTIL_H
 
+#if __STDC_VERSION__ >= 199901L
+#define _XOPEN_SOURCE 600
+#else
+#define _XOPEN_SOURCE 500
+#endif /* __STDC_VERSION__ */
+#include <time.h>
+
 #include <stdint.h>
 #include <sys/time.h>
-#include <time.h>
 #include <unistd.h>
 
 #ifdef __cplusplus
