@@ -8,8 +8,8 @@ endif(POLICY CMP0042)
 
 find_package (Threads REQUIRED)
 
-set(EXTRA_FLAGS "-Wall -Wsign-compare -g -march=native ${CMAKE_THREAD_LIBS_INIT}")
-set(EXTRA_C_FLAGS "${EXTRA_FLAGS} -std=gnu99")
+set(EXTRA_FLAGS "-Wall -Wsign-compare -g ${CMAKE_THREAD_LIBS_INIT} -mcpu=apple-m1")
+set(EXTRA_C_FLAGS "${EXTRA_FLAGS} -std=gnu99 -mcpu=apple-m1")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${EXTRA_FLAGS}")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${EXTRA_C_FLAGS}")
